@@ -1,0 +1,10 @@
+dist
+*.o
+*.hi
+*.chi
+*.chs.h
+hi/
+Session.vim
+log.txt
+report.html
+.hsenv/
