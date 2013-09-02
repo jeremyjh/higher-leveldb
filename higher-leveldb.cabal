@@ -17,14 +17,14 @@ cabal-version:       >=1.8
 
 library
 
-  ghc-options:         -Wall -Werror
+  ghc-options:         -Wall
   exposed-modules:     Database.LevelDB.Higher
   -- other-modules:       
   hs-source-dirs:      src
-  build-depends:       base ==4.5.*
-                       , binary
+  build-depends:       base == 4.* 
+                       , cereal 
                        , lifted-base
-                       , leveldb-haskell
+                       , leveldb-haskell == 0.2.*
                        , bytestring
                        , resourcet
                        , transformers

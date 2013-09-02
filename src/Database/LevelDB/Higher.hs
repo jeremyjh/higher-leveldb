@@ -1,41 +1,39 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 
 module Database.LevelDB.Higher
-    ( get, put
+    ( get, put, delete
     , scan, ScanQuery(..), queryItems, queryList, queryBegins
     , LevelDB, runLevelDB, withKeySpace
     , Key, Value, KeySpace
     ) where
 
 
-import           Prelude                          hiding((++))
 import           Control.Monad.Reader
-        (ReaderT, runReaderT, local, MonadReader, asks)
 
 import           Data.Int                         (Int32)
+import           Data.Monoid                      ((<>))
 
-import           Data.Monoid
 import           Control.Applicative              (Applicative)
 import           Control.Arrow                    ((&&&))
 import           Control.Monad.Base               (MonadBase)
-import           Control.Monad.IO.Class
+
 import           Control.Concurrent.MVar.Lifted
-        (MVar, newMVar, takeMVar, putMVar)
 
 import qualified Data.ByteString                   as BS
-import qualified Data.ByteString.Lazy              as LBS
-import qualified Data.Binary                       as Binary
+import           Data.ByteString                   (ByteString)
+import           Data.Serialize                    (encode, decode)
 
 import           Data.Default                      (def)
 import qualified Database.LevelDB                  as LDB
-import           Database.LevelDB                  hiding (put, get)
-import           Control.Monad.Trans.Resource
-        (ResourceT, MonadUnsafeIO, MonadThrow)
+import           Database.LevelDB                  hiding (put, get, delete)
+import           Control.Monad.Trans.Resource      (ResourceT
+                                                   , MonadUnsafeIO
+                                                   , MonadThrow)
 
-type Key = BS.ByteString
-type Value = BS.ByteString
-type KeySpace = BS.ByteString
-type KeySpaceId = BS.ByteString
+type Key = ByteString
+type Value = ByteString
+type KeySpace = ByteString
+type KeySpaceId = ByteString
 type Item = (Key, Value)
 
 -- | Reader-based data context API
@@ -46,7 +44,7 @@ data DBContext = DBC { dbcDb :: DB
                      , dbcSyncMV :: MVar Int32
                      }
 instance Show (DBContext) where
-    show = (++) "KeySpaceID: " . show . dbcKsId
+    show = (<>) "KeySpaceID: " . show . dbcKsId
 
 -- | LevelDB Monad provides a context for database operations provided in this module
 --
@@ -83,17 +81,21 @@ withKeySpace ks a = do
 
 put :: Key -> Value -> LevelDB ()
 put k v = do
-    {-(db, ksId) <- asks $ dbcDb &&& dbcKsId-}
-    db <- asks dbcDb
-    ksId <- asks dbcKsId
-    let packed = ksId ++ k
+    (db, ksId) <- asks $ dbcDb &&& dbcKsId
+    let packed = ksId <> k
     liftResourceT $ LDB.put db def packed v
 
 get :: Key -> LevelDB (Maybe Value)
 get k = do
     (db, ksId) <- asks $ dbcDb &&& dbcKsId
-    let packed = ksId ++ k
+    let packed = ksId <> k
     liftResourceT $ LDB.get db def packed
+
+delete :: Key -> LevelDB ()
+delete k = do
+    (db, ksId) <- asks $ dbcDb &&& dbcKsId
+    let packed = ksId <> k
+    liftResourceT $ LDB.delete db def packed
 
 -- | Structure containing functions used within the 'scan' function
 data ScanQuery a b = ScanQuery {
@@ -101,17 +103,17 @@ data ScanQuery a b = ScanQuery {
                              scanInit :: b
 
                              -- | scan will continue until this returns false
-                           , scanWhile :: (Key -> Item -> b -> Bool)
+                           , scanWhile :: Key -> Item -> b -> Bool
 
                              -- | map or transform an item before it is reduced/accumulated
-                           , scanMap ::  (Item -> a)
+                           , scanMap ::  Item -> a
 
                              -- | filter function - return 'False' to leave
                              -- this 'Item' out of the result
-                           , scanFilter :: (Item -> Bool)
+                           , scanFilter :: Item -> Bool
 
                              -- | accumulator/fold function e.g. (:)
-                           , scanReduce :: (a -> b -> b)
+                           , scanReduce :: a -> b -> b
                            }
 
 -- | a basic ScanQuery helper that defaults scanWhile to continue while
@@ -120,10 +122,10 @@ data ScanQuery a b = ScanQuery {
 --
 -- requires an 'scanInit', a 'scanMap' and a 'scanReduce' function
 queryBegins :: ScanQuery a b
-queryBegins = ScanQuery { scanWhile = (\ prefix (nk, _) _ ->
-                                      BS.length nk >= BS.length prefix
-                                      && BS.take (BS.length nk -1) nk == prefix
-                                 )
+queryBegins = ScanQuery
+                   { scanWhile = \ prefix (nk, _) _ ->
+                                          BS.length nk >= BS.length prefix
+                                          && BS.take (BS.length nk -1) nk == prefix
                    , scanInit = error "No scanInit provided."
                    , scanMap = error "No scanMap provided."
                    , scanFilter = const True
@@ -160,7 +162,7 @@ scan :: Key  -- ^ Key at which to start the scan
      -> LevelDB b
 scan k scanQuery = do
     (db, ksId) <- asks $ dbcDb &&& dbcKsId
-    liftResourceT $ withIterator db def $ doScan (ksId ++ k)
+    liftResourceT $ withIterator db def $ doScan (ksId <> k)
   where
     doScan prefix iter = do
         iterSeek iter prefix
@@ -174,16 +176,16 @@ scan k scanQuery = do
             item <- readItem
             case item of
                 (Just nk, Just nv) ->
-                    if (whileFn (nk, nv) acc) then do
+                    if whileFn (nk, nv) acc then do
                         iterNext iter
                         items <- applyIterate acc
-                        if filterFn (nk, nv) then do
-                            return $ reduceFn (mapFn (nk, nv)) items
-                            else return items
-                        else return acc
+                        return $ if filterFn (nk, nv) then
+                                     reduceFn (mapFn (nk, nv)) items
+                                 else items
+                    else return acc
                 _ -> return acc
     initV = scanInit scanQuery
-    whileFn = scanWhile scanQuery $ k
+    whileFn = scanWhile scanQuery k
     mapFn = scanMap scanQuery
     filterFn = scanFilter scanQuery
     reduceFn = scanReduce scanQuery
@@ -199,12 +201,12 @@ getKeySpaceId ks
     | ks == ""  = return defaultKeySpaceId
     | ks == "system" = return systemKeySpaceId
     | otherwise = do
-        findKS <- get $ "keyspace:" ++ ks
+        findKS <- get $ "keyspace:" <> ks
         case findKS of
             (Just foundId) -> return foundId
             Nothing -> do -- define new KS
                 nextId <- incr "max-keyspace-id"
-                put ("keyspace:" ++ ks) nextId
+                put ("keyspace:" <> ks) nextId
                 return nextId
   where
     incr k = do
@@ -213,25 +215,18 @@ getKeySpaceId ks
             0 -> initKeySpaceIdMV k >> takeMVarDBC
             n -> return n
         let nextId = curId + 1
-        put k (toBS nextId)
+        put k $ encode nextId
         putMVarDBC nextId
-        return $ toBS curId
+        return $ encode curId
     initKeySpaceIdMV k = do
         findMaxId <- get k
         case findMaxId of
-            (Just found) -> putMVarDBC $ toInt32 found
+            (Just found) -> putMVarDBC $ decodeKsId found
             Nothing      -> putMVarDBC 2 -- first user keyspace
     putMVarDBC v = asks dbcSyncMV >>= flip putMVar v
     takeMVarDBC = asks dbcSyncMV >>= takeMVar
-    toInt32 bs = (Binary.decode $ toLazy bs) :: Int32
-    toBS = toStrict . Binary.encode
-
-
-toLazy :: BS.ByteString -> LBS.ByteString
-toLazy bs = LBS.fromChunks [bs]
-
-toStrict :: LBS.ByteString -> BS.ByteString
-toStrict = BS.concat . LBS.toChunks
-
-(++) :: Monoid w => w -> w -> w
-(++) = mappend
+    decodeKsId bs =
+        case decode bs of
+            Left e -> error $
+                "Error decoding Key Space ID: " <> show bs <> "\n" <> e
+            Right i -> i :: Int32
