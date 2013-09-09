@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Database.LevelDB.Higher
     ( get, put, delete
     , scan, ScanQuery(..), queryItems, queryList, queryBegins
-    , LevelDB, runLevelDB, withKeySpace
+    , MonadLevelDB, LevelDB, runLevelDB, withKeySpace
     , Key, Value, KeySpace
     ) where
 
@@ -52,7 +53,23 @@ instance Show (DBContext) where
 newtype LevelDB a = DBCIO {unDBCIO :: ReaderT DBContext (ResourceT IO) a }
     deriving ( Functor, Applicative, Monad
              , MonadIO, MonadBase IO, MonadReader DBContext
-             , MonadResource, MonadUnsafeIO, MonadThrow )
+             , MonadResource, MonadUnsafeIO, MonadThrow)
+
+class ( MonadThrow m
+      , MonadUnsafeIO m
+      , MonadIO m
+      , Applicative m
+      , MonadReader DBContext m
+      , MonadResource m
+      , MonadBase IO m)
+      => MonadLevelDB m
+  where
+    getDB :: m (DB, KeySpaceId)
+    getDB = do
+        dbks <- asks $ dbcDb &&& dbcKsId
+        return dbks
+
+instance MonadLevelDB LevelDB
 
 instance Show (LevelDB a) where
     show = asks show
@@ -74,28 +91,28 @@ runLevelDB dbPath ks ctx = runResourceT $ do
 
 -- | Override keyspace with a local keyspace for an (block) action(s)
 --
-withKeySpace :: KeySpace -> LevelDB a -> LevelDB a
+withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
 withKeySpace ks a = do
     ksId <- getKeySpaceId ks
     local (\dbc -> dbc { dbcKsId = ksId}) a
 
-put :: Key -> Value -> LevelDB ()
+put :: (MonadLevelDB m) => Key -> Value -> m ()
 put k v = do
     (db, ksId) <- asks $ dbcDb &&& dbcKsId
     let packed = ksId <> k
-    liftResourceT $ LDB.put db def packed v
+    LDB.put db def packed v
 
-get :: Key -> LevelDB (Maybe Value)
+get :: (MonadLevelDB m) => Key -> m (Maybe Value)
 get k = do
-    (db, ksId) <- asks $ dbcDb &&& dbcKsId
+    (db, ksId) <- getDB
     let packed = ksId <> k
-    liftResourceT $ LDB.get db def packed
+    LDB.get db def packed
 
-delete :: Key -> LevelDB ()
+delete :: (MonadLevelDB m) => Key -> m ()
 delete k = do
-    (db, ksId) <- asks $ dbcDb &&& dbcKsId
+    (db, ksId) <- getDB
     let packed = ksId <> k
-    liftResourceT $ LDB.delete db def packed
+    LDB.delete db def packed
 
 -- | Structure containing functions used within the 'scan' function
 data ScanQuery a b = ScanQuery {
@@ -157,12 +174,13 @@ queryList  = queryBegins { scanInit = []
 -- This is essentially a fold left that will run until the 'scanWhile'
 -- condition is met or the iterator is exhausted. All the results will be
 -- copied into memory before the function returns.
-scan :: Key  -- ^ Key at which to start the scan
+scan :: (MonadLevelDB m)
+     => Key  -- ^ Key at which to start the scan
      -> ScanQuery a b
-     -> LevelDB b
+     -> m b
 scan k scanQuery = do
-    (db, ksId) <- asks $ dbcDb &&& dbcKsId
-    liftResourceT $ withIterator db def $ doScan (ksId <> k)
+    (db, ksId) <- getDB
+    withIterator db def $ doScan (ksId <> k)
   where
     doScan prefix iter = do
         iterSeek iter prefix
@@ -196,7 +214,7 @@ defaultKeySpaceId = "\0\0\0\0"
 systemKeySpaceId ::  KeySpaceId
 systemKeySpaceId = "\0\0\0\1"
 
-getKeySpaceId :: KeySpace -> LevelDB KeySpaceId
+getKeySpaceId :: (MonadLevelDB m) => KeySpace -> m KeySpaceId
 getKeySpaceId ks
     | ks == ""  = return defaultKeySpaceId
     | ks == "system" = return systemKeySpaceId
