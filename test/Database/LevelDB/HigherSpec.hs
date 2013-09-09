@@ -59,5 +59,5 @@ spec = do
 
 testDB = "/tmp/leveltest"
 
-withDBT :: LevelDB a -> IO a
+withDBT :: LevelDBT IO a -> IO a
 withDBT = runLevelDB testDB "Database.LevelDB.HigherSpec"

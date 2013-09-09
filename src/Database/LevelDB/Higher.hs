@@ -1,10 +1,12 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE UndecidableInstances, ConstraintKinds #-}
 
 module Database.LevelDB.Higher
     ( get, put, delete
     , scan, ScanQuery(..), queryItems, queryList, queryBegins
-    , MonadLevelDB, LevelDB, runLevelDB, withKeySpace
+    , MonadLevelDB, LevelDBT, LevelDB, runLevelDB, withKeySpace
     , Key, Value, KeySpace
     ) where
 
@@ -14,9 +16,10 @@ import           Control.Monad.Reader
 import           Data.Int                         (Int32)
 import           Data.Monoid                      ((<>))
 
+
 import           Control.Applicative              (Applicative)
 import           Control.Arrow                    ((&&&))
-import           Control.Monad.Base               (MonadBase)
+import           Control.Monad.Base               (MonadBase(..))
 
 import           Control.Concurrent.MVar.Lifted
 
@@ -29,7 +32,8 @@ import qualified Database.LevelDB                  as LDB
 import           Database.LevelDB                  hiding (put, get, delete)
 import           Control.Monad.Trans.Resource      (ResourceT
                                                    , MonadUnsafeIO
-                                                   , MonadThrow)
+                                                   , MonadThrow
+                                                   , MonadResourceBase)
 
 type Key = ByteString
 type Value = ByteString
@@ -47,14 +51,27 @@ data DBContext = DBC { dbcDb :: DB
 instance Show (DBContext) where
     show = (<>) "KeySpaceID: " . show . dbcKsId
 
--- | LevelDB Monad provides a context for database operations provided in this module
+
+
+
+-- | LevelDBT Transformer provides a context for database operations
+-- provided in this module.
+--
+-- This transformer has the same constraints as 'ResourceT' as it wraps
+-- 'ResourceT' along with a 'DBContext' 'Reader'.
+--
+-- If you aren't building a custom monad stack you can just use the LevelDB alias.
 --
 -- Use 'runLevelDB'
-newtype LevelDB a = DBCIO {unDBCIO :: ReaderT DBContext (ResourceT IO) a }
-    deriving ( Functor, Applicative, Monad
-             , MonadIO, MonadBase IO, MonadReader DBContext
-             , MonadResource, MonadUnsafeIO, MonadThrow)
+newtype LevelDBT m a
+        =  LevelDBT { unLevelDBT :: ReaderT DBContext (ResourceT m) a }
+            deriving ( Functor, Applicative, Monad
+                     , MonadIO, MonadReader DBContext
+                     , MonadThrow )
 
+-- | MonadLevelDB class basically just captures all the constraints required
+-- when defining a custom monad stack or defining functions you want to work
+-- with any LevelDBT derived stack
 class ( MonadThrow m
       , MonadUnsafeIO m
       , MonadIO m
@@ -63,31 +80,40 @@ class ( MonadThrow m
       , MonadResource m
       , MonadBase IO m)
       => MonadLevelDB m
-  where
-    getDB :: m (DB, KeySpaceId)
-    getDB = do
-        dbks <- asks $ dbcDb &&& dbcKsId
-        return dbks
 
-instance MonadLevelDB LevelDB
+instance (MonadResourceBase m) => MonadBase IO (LevelDBT m) where
+    liftBase = lift . liftBase
 
-instance Show (LevelDB a) where
+instance (MonadResourceBase m) => MonadLevelDB (LevelDBT m)
+
+instance MonadTrans LevelDBT where
+    lift = LevelDBT . lift . lift
+
+instance (MonadResourceBase m) => MonadResource (LevelDBT m) where
+    liftResourceT = LevelDBT . liftResourceT
+
+instance Show (LevelDBT m a) where
     show = asks show
 
--- | Specify a filepath to use for the database (will create if not there)
--- Also specify an application-defined keyspace in which keys will be guaranteed unique
-runLevelDB :: FilePath -> KeySpace -> LevelDB a -> IO a
+-- | alias for LevelDBT IO - useful if you aren't building a custom stack
+type LevelDB a = LevelDBT IO a
+
+-- |Build a context and execute the actions.
+-- Specify a filepath to use for the database (will create if not there).
+-- Also specify an application-defined keyspace in which keys
+-- will be guaranteed unique
+runLevelDB :: (MonadResourceBase m) => FilePath -> KeySpace -> LevelDBT m a -> m a
 runLevelDB dbPath ks ctx = runResourceT $ do
     db <- openDB dbPath
     mv <- newMVar 0
     ksId <- withSystemContext db mv $ getKeySpaceId ks
-    runReaderT (unDBCIO ctx) (DBC db ksId mv)
+    runReaderT (unLevelDBT ctx) (DBC db ksId mv)
   where
     openDB path =
         LDB.open path
             LDB.defaultOptions{LDB.createIfMissing = True, LDB.cacheSize= 2048}
     withSystemContext db mv sctx =
-        runReaderT (unDBCIO sctx) $ DBC db systemKeySpaceId mv
+        runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv
 
 -- | Override keyspace with a local keyspace for an (block) action(s)
 --
@@ -116,22 +142,22 @@ delete k = do
 
 -- | Structure containing functions used within the 'scan' function
 data ScanQuery a b = ScanQuery {
-                             -- | starting value for fold/reduce
-                             scanInit :: b
+                         -- | starting value for fold/reduce
+                         scanInit :: b
 
-                             -- | scan will continue until this returns false
-                           , scanWhile :: Key -> Item -> b -> Bool
+                         -- | scan will continue until this returns false
+                       , scanWhile :: Key -> Item -> b -> Bool
 
-                             -- | map or transform an item before it is reduced/accumulated
-                           , scanMap ::  Item -> a
+                         -- | map or transform an item before it is reduced/accumulated
+                       , scanMap ::  Item -> a
 
-                             -- | filter function - return 'False' to leave
-                             -- this 'Item' out of the result
-                           , scanFilter :: Item -> Bool
+                         -- | filter function - return 'False' to leave
+                         -- this 'Item' out of the result
+                       , scanFilter :: Item -> Bool
 
-                             -- | accumulator/fold function e.g. (:)
-                           , scanReduce :: a -> b -> b
-                           }
+                         -- | accumulator/fold function e.g. (:)
+                       , scanReduce :: a -> b -> b
+                       }
 
 -- | a basic ScanQuery helper that defaults scanWhile to continue while
 -- the key argument supplied to scan matches the beginning of the key returned
@@ -207,6 +233,9 @@ scan k scanQuery = do
     mapFn = scanMap scanQuery
     filterFn = scanFilter scanQuery
     reduceFn = scanReduce scanQuery
+
+getDB :: (MonadLevelDB m) => m (DB, KeySpaceId)
+getDB = asks $ dbcDb &&& dbcKsId
 
 defaultKeySpaceId :: KeySpaceId
 defaultKeySpaceId = "\0\0\0\0"
