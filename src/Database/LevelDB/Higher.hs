@@ -1,6 +1,6 @@
 -- |
 -- Higher LevelDB provides a rich monadic API for working with leveldb databases. It uses
--- the leveldb-haskell library's bindings to the C library. The LevelDBT transformer is
+-- the leveldb-haskell bindings to the C++ library. The LevelDBT transformer is
 -- a Reader that maintains a database context with the open database as well as
 -- default read and write options. It also manages a concept called a KeySpace, which is a bucket
 -- scheme that provides a low-overhead named identifier to segregate data. Finally it wraps a 'ResourceT'
@@ -23,17 +23,22 @@ module Database.LevelDB.Higher
     -- * Introduction
     -- $intro
 
+    -- * Basic types
+      Key, Value, Item, KeySpace, KeySpaceId
     -- * Basic operations
-      get, put, delete
+    , get, put, delete
     -- * Batch operations
     , runBatch, putB, deleteB
-    , Options(..), ReadOptions(..), WriteOptions(..), withOptions, def
     -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
+    -- * Monadic Types and Operations
     , MonadLevelDB(..), LevelDBT, LevelDB
-    , runLevelDB, runLevelDB', getDB, withKeySpace
-    , Key, Value, KeySpace, KeySpaceId
+    , runLevelDB, runLevelDB', withKeySpace, withOptions
+    -- * Misc
+    , getDB
+    -- * Re-exports
     , runResourceT, resourceForkIO
+    , Options(..), ReadOptions(..), WriteOptions(..), def
     , MonadUnsafeIO, MonadThrow, MonadResourceBase
     ) where
 
@@ -75,25 +80,24 @@ import qualified Control.Monad.Trans.State.Strict  as Strict
 import qualified Control.Monad.Trans.Writer.Strict as Strict
 
 -- $intro
--- Higher LevelDB provides a monadic interface for working with your database. Operations
--- take place within a MonadLevelDB which is built with the LevelDBT transformer; the most
--- basic type would be LevelDBT IO which is type aliased as LevelDB.
+-- Operations take place within a 'MonadLevelDB' which is built with the LevelDBT transformer; the most
+-- basic type would be 'LevelDBT' 'IO' which is type aliased as 'LevelDB'. The basic operations are
+-- the same as the underlying leveldb-haskell versions except that the DB and Options arguments are
+-- passed along by the LevelDB Reader, and the keys are automatically qualified with the KeySpaceId.
 --
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- > import Database.LevelDB.Higher
 -- >
--- > runLevelDB "/tmp/mydb" def {createIfMissing  = true} def "" $ do
+-- > runLevelDB "/tmp/mydb" def {createIfMissing  = true} def "MyKeySpace" $ do
 -- >    put "key:1" "this is a value"
 -- >    get "key:1"
 -- >
--- > Just "this is a value"
+-- > --> Just "this is a value"
 --
--- Take a look at the tests in HighSpec.hs to get an idea of how to use the different functions
--- documented below.
 
 type Key = ByteString
 type Value = ByteString
--- | A KeySpace is similar concept to a "bucket" in other libraries and database systems.
+-- | A KeySpace is similar concept to a \"bucket\" in other libraries and database systems.
 -- The ByteString for KeySpace can be arbitrarily long without performance impact because
 -- the system maps the KeySpace name to a 4-byte KeySpaceId internally which is preprended to each Key.
 -- KeySpaces are cheap and plentiful and indeed with this library you cannot escape them
@@ -124,7 +128,7 @@ instance Show (DBContext) where
 -- This transformer has the same constraints as 'ResourceT' as it wraps
 -- 'ResourceT' along with a 'DBContext' 'Reader'.
 --
--- If you aren't building a custom monad stack you can just use the LevelDB alias.
+-- If you aren't building a custom monad stack you can just use the 'LevelDB' alias.
 newtype LevelDBT m a
         =  LevelDBT { unLevelDBT :: ReaderT DBContext (ResourceT m) a }
             deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow)
@@ -162,9 +166,9 @@ class ( MonadThrow m
       , MonadBase IO m )
       => MonadLevelDB m where
     -- | Override context for an action - only usable internally for functions
-    -- like 'withKeySpace' and 'withOptions'
+    -- like 'withKeySpace' and 'withOptions'.
     withDBContext :: (DBContext -> DBContext) -> m a -> m a
-    -- | Lift a LevelDB IO action into the current monad
+    -- | Lift a LevelDB IO action into the current monad.
     liftLevelDBT :: LevelDBT IO a -> m a
 
 
@@ -192,10 +196,10 @@ INST(Monoid w, Strict.WriterT w, Strict.mapWriterT)
 INST(Monoid w, RWS.RWST r w s, RWS.mapRWST)
 INST(Monoid w, Strict.RWST r w s, Strict.mapRWST)
 #undef INST
--- | alias for LevelDBT IO - useful if you aren't building a custom stack
+-- | alias for LevelDBT IO - useful if you aren't building a custom stack.
 type LevelDB a = LevelDBT IO a
 
--- |Build a context and execute the actions; uses a ResourceT internally.
+-- |Build a context and execute the actions; uses a 'ResourceT' internally.
 runLevelDB :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
@@ -205,9 +209,9 @@ runLevelDB :: (MonadResourceBase m)
            -> m a
 runLevelDB dbPath dbopt rwopt ks ctx = runResourceT $ runLevelDB' dbPath dbopt rwopt ks ctx
 
--- |Same as 'runLevelDB' but doesn't call runResourceT. This gives you the option
+-- |Same as 'runLevelDB' but doesn't call 'runResourceT'. This gives you the option
 -- to manage that yourself - which may be required for example when you have multiple
--- threads using the same DB; see 'resourceForkIO' for more information
+-- threads using the same DB; see 'resourceForkIO' for more information.
 runLevelDB' :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
@@ -226,32 +230,32 @@ runLevelDB' dbPath dbopt rwopt ks ctx = do
         runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt
 
 
--- | Local keyspace for the action
+-- | Local keyspace for the action.
 withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
 withKeySpace ks ma = do
     ksId <- getKeySpaceId ks
     withDBContext (\dbc -> dbc { dbcKsId = ksId}) ma
 
--- | Local Read/Write Otions for the action
+-- | Local Read/Write Options for the action.
 withOptions :: (MonadLevelDB m) => RWOptions -> m a -> m a
 withOptions opts =
     withDBContext (\dbc -> dbc { dbcRWOptions = opts })
 
--- | Put a value in the current DB and KeySpace
+-- | Put a value in the current DB and KeySpace.
 put :: (MonadLevelDB m) => Key -> Value -> m ()
 put k v = do
     (db, ksId, (_, wopt)) <- getDB
     let packed = ksId <> k
     LDB.put db wopt packed v
 
--- | Get a value from the current DB and KeySpace
+-- | Get a value from the current DB and KeySpace.
 get :: (MonadLevelDB m) => Key -> m (Maybe Value)
 get k = do
     (db, ksId, (ropt, _)) <- getDB
     let packed = ksId <> k
     LDB.get db ropt packed
 
--- | Delete an entry from the current DB and KeySpace
+-- | Delete an entry from the current DB and KeySpace.
 delete :: (MonadLevelDB m) => Key -> m ()
 delete k = do
     (db, ksId, (_, wopt)) <- getDB
@@ -259,7 +263,7 @@ delete k = do
     LDB.delete db wopt packed
 
 -- | Write a batch of operations - use the 'write' and 'deleteB' functions to
--- add operations to the batch list
+-- add operations to the batch list.
 runBatch :: (MonadLevelDB m)
           => WriterT WriteBatch m ()
           -> m ()
@@ -268,14 +272,14 @@ runBatch wb = do
     (_, ops) <- runWriterT wb
     LDB.write db wopt ops
 
--- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch'
+-- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch'.
 putB :: (MonadLevelDB m) => Key -> Value -> WriterT WriteBatch m ()
 putB k v = do
     (_, ksId, _) <- getDB
     tell [Put (ksId <> k) v]
     return ()
 
--- | Add a "Del" operation to a WriteBatch -- for use with 'runBatch'
+-- | Add a "Del" operation to a WriteBatch -- for use with 'runBatch'.
 deleteB :: (MonadLevelDB m) => Key -> WriterT WriteBatch m ()
 deleteB k = do
     (_, ksId, _) <- getDB
@@ -290,8 +294,8 @@ deleteB k = do
 -- condition is met or the iterator is exhausted. All the results will be
 -- copied into memory before the function returns.
 scan :: (MonadLevelDB m)
-     => Key  -- ^ Key at which to start the scan
-     -> ScanQuery a b -- ^ query functions to execute -- see 'ScanQuery' docs
+     => Key  -- ^ Key at which to start the scan.
+     -> ScanQuery a b -- ^ query functions to execute -- see 'ScanQuery' docs.
      -> m b
 scan k scanQuery = do
     (db, ksId, (ropt,_)) <- getDB
@@ -324,7 +328,12 @@ scan k scanQuery = do
     reduceFn = scanFold scanQuery
 
 -- | Structure containing functions used within the 'scan' function. You may want to start
--- with one of the builder/helper funcions such as 'queryItems'.
+-- with one of the builder/helper funcions such as 'queryItems', which is defined as:
+--
+-- >queryItems = queryBegins { scanInit = []
+-- >                         , scanMap = id
+-- >                         , scanFold = (:)
+-- >                         }
 data ScanQuery a b = ScanQuery {
                          -- | starting value for fold/reduce
                          scanInit :: b
@@ -346,7 +355,7 @@ data ScanQuery a b = ScanQuery {
 -- | A partial ScanQuery helper; this query will find all keys that begin with the Key argument
 -- supplied to scan.
 --
--- requires an 'scanInit', a 'scanMap' and a 'scanFold' function
+-- Requires an 'scanInit', a 'scanMap' and a 'scanFold' function.
 queryBegins :: ScanQuery a b
 queryBegins = ScanQuery
                    { scanWhile = \ prefix (nk, _) _ ->
@@ -361,40 +370,43 @@ queryBegins = ScanQuery
 -- | A basic ScanQuery helper; this query will find all keys that begin the Key argument
 -- supplied to scan, and returns them in a list of 'Item'.
 --
--- does not require any functions though they could be substituted
+-- Does not require any function overrides.
 queryItems :: ScanQuery Item [Item]
 queryItems = queryBegins { scanInit = []
                        , scanMap = id
                        , scanFold = (:)
                        }
 
--- | a ScanQuery helper with defaults for queryBegins and a list result; requires a map function
+-- | a ScanQuery helper with defaults for queryBegins and a list result; requires a map function e.g.:
 --
+-- > scan "encoded-values:" queryList { scanMap = \(_, v) -> decode v }
 queryList :: ScanQuery a [a]
 queryList  = queryBegins { scanInit = []
                        , scanFilter = const True
                        , scanFold = (:)
                        }
 
--- | a ScanQuery helper to count items beginning with Key argument
+-- | a ScanQuery helper to count items beginning with Key argument.
 queryCount :: (Num a) => ScanQuery a a
 queryCount = queryBegins { scanInit = 0
                          , scanMap = const 1
                          , scanFold = (+) }
 
--- | Fetch the leveldb-haskell 'DB' so that you can use that library directly
+-- | Fetch the leveldb-haskell 'DB' and related state so that you can use that library directly
 -- if required.
 --
--- Also returns the KeySpaceId which would be required to operate on
+-- Returns the 'KeySpaceId' which would be required to operate on
 -- entries in a managed KeySpace. Append this to the front of your keys before inserting
--- and remove it (drop 4) when reading.
+-- and remove it (drop 4) when reading. This is here as an escape hatch but use is discouraged.
+--
+-- The 'RWOptions' in use are also returned.
 getDB :: (MonadLevelDB m) => m (DB, KeySpaceId, RWOptions)
 getDB = liftLevelDBT $ asksLDB (\dbc ->
         (dbcDb dbc, dbcKsId dbc, dbcRWOptions dbc))
 
 
 -- | This little dance with asksLDB & localLDB let's us get away from
--- exposing MonadReader DBContext
+-- exposing MonadReader DBContext in LevelDBT.
 asksLDB :: (MonadResourceBase m) => (DBContext -> a) -> LevelDBT m a
 asksLDB = LevelDBT . asks
 
