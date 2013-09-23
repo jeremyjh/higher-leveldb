@@ -71,9 +71,9 @@ spec = do
             it "can write data in batches" $ do
                 runLevelDB testDB "batches" $ do
                     runBatch $ do
-                        write "\1" "first"
-                        write "\2" "second"
-                        write "\3" "third"
+                        putB "\1" "first"
+                        putB "\2" "second"
+                        putB "\3" "third"
                         deleteB "\2"
                     scan "" queryCount
                `shouldReturn` 2

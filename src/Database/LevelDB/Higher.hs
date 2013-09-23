@@ -9,7 +9,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 
 module Database.LevelDB.Higher
-    ( get, put, delete, runBatch, write, deleteB
+    ( get, put, delete, runBatch, putB, deleteB
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     , MonadLevelDB(..), LevelDBT, LevelDB, withKeySpace
     , runLevelDB, runLevelDB', getDB
@@ -242,8 +242,8 @@ runBatch wb = do
     LDB.write db def ops
 
 -- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch'
-write :: (MonadLevelDB m) => Key -> Value -> WriterT WriteBatch m ()
-write k v = do
+putB :: (MonadLevelDB m) => Key -> Value -> WriterT WriteBatch m ()
+putB k v = do
     (_, ksId) <- getDB
     tell [Put (ksId <> k) v]
     return ()
