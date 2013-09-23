@@ -1,3 +1,13 @@
+-- |
+-- Higher LevelDB provides a rich monadic API for working with leveldb databases. It uses
+-- the leveldb-haskell library's bindings to the C library. The LevelDBT transformer is
+-- a Reader that maintains a database context with the open database as well as
+-- default read and write options. It also manages a concept called a KeySpace, which is a bucket
+-- scheme that provides a low-overhead named identifier to segregate data. Finally it wraps a 'ResourceT'
+-- which is required for use of leveldb-haskell functions.
+--
+-- The other major feature is the scan function and its ScanQuery structure that provides a
+-- map / fold abstraction over the Iterator exposed by leveldb-haskell.
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP #-}
@@ -9,11 +19,19 @@
 {-# LANGUAGE ConstraintKinds #-}
 
 module Database.LevelDB.Higher
-    ( get, put, delete, runBatch, putB, deleteB
+    (
+    -- * Introduction
+    -- $intro
+
+    -- * Basic operations
+      get, put, delete
+    -- * Batch operations
+    , runBatch, putB, deleteB
+    , Options(..), ReadOptions(..), WriteOptions(..), withOptions, def
+    -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     , MonadLevelDB(..), LevelDBT, LevelDB
     , runLevelDB, runLevelDB', getDB, withKeySpace
-    , Options(..), ReadOptions(..), WriteOptions(..), withOptions, def
     , Key, Value, KeySpace, KeySpaceId
     , runResourceT, resourceForkIO
     , MonadUnsafeIO, MonadThrow, MonadResourceBase
@@ -63,7 +81,6 @@ import qualified Control.Monad.Trans.Writer.Strict as Strict
 --
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- > import Database.LevelDB.Higher
--- > import Data.ByteString as BS
 -- >
 -- > runLevelDB "/tmp/mydb" def {createIfMissing  = true} def "" $ do
 -- >    put "key:1" "this is a value"
@@ -217,8 +234,8 @@ withKeySpace ks ma = do
 
 -- | Local Read/Write Otions for the action
 withOptions :: (MonadLevelDB m) => RWOptions -> m a -> m a
-withOptions opts ma =
-    withDBContext (\dbc -> dbc { dbcRWOptions = opts }) ma
+withOptions opts =
+    withDBContext (\dbc -> dbc { dbcRWOptions = opts })
 
 -- | Put a value in the current DB and KeySpace
 put :: (MonadLevelDB m) => Key -> Value -> m ()
