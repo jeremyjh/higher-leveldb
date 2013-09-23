@@ -44,13 +44,13 @@ spec = do
                     get "deletekey"
                 `shouldReturn` Nothing
             it "can isolate data with keyspaces" $ do
-                runLevelDB testDB "thespace" $ do
+                runLevelDB testDB dbOpts def "thespace" $ do
                     put "thekey" "thevalue"
                     withKeySpace "otherspace" $ put "thekey" "othervalue"
                     get "thekey"
                 `shouldReturn` (Just "thevalue")
             it "can scan and transform" $ do
-                runLevelDB testDB "scan" $ do
+                runLevelDB testDB dbOpts def "scan" $ do
                     put "employee:1" "Jill"
                     put "employee:2" "Jack"
                     put "cheeseburgers:1" "do not want"
@@ -69,7 +69,7 @@ spec = do
                                , [("employee:1", "Jill")]
                                , 148)
             it "can write data in batches" $ do
-                runLevelDB testDB "batches" $ do
+                runLevelDB testDB dbOpts def "batches" $ do
                     runBatch $ do
                         putB "\1" "first"
                         putB "\2" "second"
@@ -110,23 +110,24 @@ spec = do
                                , "toljer")
 
 testDB = "/tmp/leveltest"
+dbOpts = def {createIfMissing = True, cacheSize= 2048}
 
 withDBT :: LevelDBT IO a -> IO a
-withDBT = runLevelDB testDB "Database.LevelDB.HigherSpec"
+withDBT = runLevelDB testDB dbOpts def "Database.LevelDB.HigherSpec"
 
 withDBRT :: LevelDBT IO a -> IO a
-withDBRT = runResourceT . runLevelDB' testDB "Database.LevelDB.HigherSpec"
+withDBRT = runResourceT . runLevelDB' testDB dbOpts def "Database.LevelDB.HigherSpec"
 
 runTestAppR :: FilePath -> KeySpace -> TestAppR a -> IO a
-runTestAppR path ks ta = runLevelDB path ks $ do
+runTestAppR path ks ta = runLevelDB path dbOpts def ks $ do
     runReaderT (unTestAppR ta) "a string value to read"
 
 runTestAppW :: FilePath -> KeySpace -> TestAppW a -> IO (a, BS.ByteString)
-runTestAppW path ks ta = runLevelDB path ks $ do
+runTestAppW path ks ta = runLevelDB path dbOpts def ks $ do
     runWriterT (unTestAppW ta)
 
 runTestAppRW :: FilePath -> KeySpace -> TestAppRW a -> IO (a, BS.ByteString)
-runTestAppRW path ks ta = runLevelDB path ks $ do
+runTestAppRW path ks ta = runLevelDB path dbOpts def ks $ do
     runWriterT $ runReaderT (unTestAppRW ta) "a different string value to read"
 
 

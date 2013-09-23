@@ -13,6 +13,7 @@ module Database.LevelDB.Higher
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     , MonadLevelDB(..), LevelDBT, LevelDB, withKeySpace
     , runLevelDB, runLevelDB', getDB
+    , Options(..), ReadOptions(..), WriteOptions(..), def
     , Key, Value, KeySpace, KeySpaceId
     , runResourceT, resourceForkIO
     , MonadUnsafeIO, MonadThrow, MonadResourceBase
@@ -25,7 +26,6 @@ import           Data.Word                        (Word32)
 
 
 import           Control.Applicative              (Applicative)
-import           Control.Arrow                    ((&&&))
 import           Control.Monad.Base               (MonadBase(..))
 
 import           Control.Concurrent.MVar.Lifted
@@ -65,7 +65,7 @@ import qualified Control.Monad.Trans.Writer.Strict as Strict
 -- > import Database.LevelDB.Higher
 -- > import Data.ByteString as BS
 -- >
--- > runLevelDB "/tmp/mydb" "" $ do
+-- > runLevelDB "/tmp/mydb" def {createIfMissing  = true} def "" $ do
 -- >    put "key:1" "this is a value"
 -- >    get "key:1"
 -- >
@@ -95,6 +95,7 @@ type Item = (Key, Value)
 data DBContext = DBC { dbcDb :: DB
                      , dbcKsId :: KeySpaceId
                      , dbcSyncMV :: MVar Word32
+                     , dbcRWOptions :: (ReadOptions, WriteOptions)
                      }
 instance Show (DBContext) where
     show = (<>) "KeySpaceID: " . show . dbcKsId
@@ -179,30 +180,32 @@ type LevelDB a = LevelDBT IO a
 -- |Build a context and execute the actions; uses a ResourceT internally.
 runLevelDB :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
+           -> Options -- ^ database options to use
+           -> (ReadOptions, WriteOptions) -- ^ default read/write ops; use 'withOptions' to override
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> m a
-runLevelDB dbPath ks ctx = runResourceT $ runLevelDB' dbPath ks ctx
+runLevelDB dbPath dbopt rwopt ks ctx = runResourceT $ runLevelDB' dbPath dbopt rwopt ks ctx
 
 -- |Same as 'runLevelDB' but doesn't call runResourceT. This gives you the option
 -- to manage that yourself - which may be required for example when you have multiple
 -- threads using the same DB; see 'resourceForkIO' for more information
 runLevelDB' :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
+           -> Options -- ^ database options to use
+           -> (ReadOptions, WriteOptions) -- ^ default read/write ops; use 'withOptions' to override
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> ResourceT m a
-runLevelDB' dbPath ks ctx = do
+runLevelDB' dbPath dbopt rwopt ks ctx = do
     db <- openDB dbPath
     mv <- newMVar 0
     ksId <- withSystemContext db mv $ getKeySpaceId ks
-    runReaderT (unLevelDBT ctx) (DBC db ksId mv)
+    runReaderT (unLevelDBT ctx) (DBC db ksId mv rwopt)
   where
-    openDB path =
-        LDB.open path
-            LDB.defaultOptions{LDB.createIfMissing = True, LDB.cacheSize= 2048}
+    openDB path = LDB.open path dbopt
     withSystemContext db mv sctx =
-        runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv
+        runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt
 
 
 withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
@@ -213,23 +216,23 @@ withKeySpace ks ma = do
 -- | Put a value in the current DB and KeySpace
 put :: (MonadLevelDB m) => Key -> Value -> m ()
 put k v = do
-    (db, ksId) <- getDB
+    (db, ksId, (_, wopt)) <- getDB
     let packed = ksId <> k
-    LDB.put db def packed v
+    LDB.put db wopt packed v
 
 -- | Get a value from the current DB and KeySpace
 get :: (MonadLevelDB m) => Key -> m (Maybe Value)
 get k = do
-    (db, ksId) <- getDB
+    (db, ksId, (ropt, _)) <- getDB
     let packed = ksId <> k
-    LDB.get db def packed
+    LDB.get db ropt packed
 
 -- | Delete an entry from the current DB and KeySpace
 delete :: (MonadLevelDB m) => Key -> m ()
 delete k = do
-    (db, ksId) <- getDB
+    (db, ksId, (_, wopt)) <- getDB
     let packed = ksId <> k
-    LDB.delete db def packed
+    LDB.delete db wopt packed
 
 -- | Write a batch of operations - use the 'write' and 'deleteB' functions to
 -- add operations to the batch list
@@ -237,21 +240,21 @@ runBatch :: (MonadLevelDB m)
           => WriterT WriteBatch m ()
           -> m ()
 runBatch wb = do
-    (db, _) <- getDB
+    (db, _, (_, wopt)) <- getDB
     (_, ops) <- runWriterT wb
-    LDB.write db def ops
+    LDB.write db wopt ops
 
 -- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch'
 putB :: (MonadLevelDB m) => Key -> Value -> WriterT WriteBatch m ()
 putB k v = do
-    (_, ksId) <- getDB
+    (_, ksId, _) <- getDB
     tell [Put (ksId <> k) v]
     return ()
 
 -- | Add a "Del" operation to a WriteBatch -- for use with 'runBatch'
 deleteB :: (MonadLevelDB m) => Key -> WriterT WriteBatch m ()
 deleteB k = do
-    (_, ksId) <- getDB
+    (_, ksId, _) <- getDB
     tell [Del (ksId <> k)]
     return ()
 
@@ -267,8 +270,8 @@ scan :: (MonadLevelDB m)
      -> ScanQuery a b -- ^ query functions to execute -- see 'ScanQuery' docs
      -> m b
 scan k scanQuery = do
-    (db, ksId) <- getDB
-    withIterator db def $ doScan (ksId <> k)
+    (db, ksId, (ropt,_)) <- getDB
+    withIterator db ropt $ doScan (ksId <> k)
   where
     doScan prefix iter = do
         iterSeek iter prefix
@@ -361,8 +364,10 @@ queryCount = queryBegins { scanInit = 0
 -- Also returns the KeySpaceId which would be required to operate on
 -- entries in a managed KeySpace. Append this to the front of your keys before inserting
 -- and remove it (drop 4) when reading.
-getDB :: (MonadLevelDB m) => m (DB, KeySpaceId)
-getDB = liftLevelDBT $ asksLDB (dbcDb &&& dbcKsId)
+getDB :: (MonadLevelDB m) => m (DB, KeySpaceId, (ReadOptions, WriteOptions))
+getDB = liftLevelDBT $ asksLDB (\dbc ->
+        (dbcDb dbc, dbcKsId dbc, dbcRWOptions dbc))
+
 
 -- | This little dance with asksLDB & localLDB let's us get away from
 -- exposing MonadReader DBContext
