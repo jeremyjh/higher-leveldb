@@ -49,6 +49,12 @@ spec = do
                     withKeySpace "otherspace" $ put "thekey" "othervalue"
                     get "thekey"
                 `shouldReturn` (Just "thevalue")
+            it "can override read/write options locally" $ do
+                withDBT $ do
+                    withOptions (def, def {sync = True}) $ do
+                        put "puttingsync" "can't you tell?"
+                        get "puttingsync"
+                `shouldReturn` Just "can't you tell?"
             it "can scan and transform" $ do
                 runLevelDB testDB dbOpts def "scan" $ do
                     put "employee:1" "Jill"

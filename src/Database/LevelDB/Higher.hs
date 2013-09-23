@@ -11,9 +11,9 @@
 module Database.LevelDB.Higher
     ( get, put, delete, runBatch, putB, deleteB
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
-    , MonadLevelDB(..), LevelDBT, LevelDB, withKeySpace
-    , runLevelDB, runLevelDB', getDB
-    , Options(..), ReadOptions(..), WriteOptions(..), def
+    , MonadLevelDB(..), LevelDBT, LevelDB
+    , runLevelDB, runLevelDB', getDB, withKeySpace
+    , Options(..), ReadOptions(..), WriteOptions(..), withOptions, def
     , Key, Value, KeySpace, KeySpaceId
     , runResourceT, resourceForkIO
     , MonadUnsafeIO, MonadThrow, MonadResourceBase
@@ -89,13 +89,14 @@ type KeySpaceId = ByteString
 -- | The basic unit of storage is a Key/Value pair.
 type Item = (Key, Value)
 
+type RWOptions = (ReadOptions, WriteOptions)
 -- | Reader-based data context API
 --
 -- Context contains database handle and KeySpace
 data DBContext = DBC { dbcDb :: DB
                      , dbcKsId :: KeySpaceId
                      , dbcSyncMV :: MVar Word32
-                     , dbcRWOptions :: (ReadOptions, WriteOptions)
+                     , dbcRWOptions :: RWOptions
                      }
 instance Show (DBContext) where
     show = (<>) "KeySpaceID: " . show . dbcKsId
@@ -144,7 +145,7 @@ class ( MonadThrow m
       , MonadBase IO m )
       => MonadLevelDB m where
     -- | Override context for an action - only usable internally for functions
-    -- like 'withKeySpace'
+    -- like 'withKeySpace' and 'withOptions'
     withDBContext :: (DBContext -> DBContext) -> m a -> m a
     -- | Lift a LevelDB IO action into the current monad
     liftLevelDBT :: LevelDBT IO a -> m a
@@ -181,7 +182,7 @@ type LevelDB a = LevelDBT IO a
 runLevelDB :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
-           -> (ReadOptions, WriteOptions) -- ^ default read/write ops; use 'withOptions' to override
+           -> RWOptions -- ^ default read/write ops; use 'withOptions' to override
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> m a
@@ -193,7 +194,7 @@ runLevelDB dbPath dbopt rwopt ks ctx = runResourceT $ runLevelDB' dbPath dbopt r
 runLevelDB' :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
-           -> (ReadOptions, WriteOptions) -- ^ default read/write ops; use 'withOptions' to override
+           -> RWOptions -- ^ default read/write ops; use 'withOptions' to override
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> ResourceT m a
@@ -208,10 +209,16 @@ runLevelDB' dbPath dbopt rwopt ks ctx = do
         runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt
 
 
+-- | Local keyspace for the action
 withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
 withKeySpace ks ma = do
     ksId <- getKeySpaceId ks
     withDBContext (\dbc -> dbc { dbcKsId = ksId}) ma
+
+-- | Local Read/Write Otions for the action
+withOptions :: (MonadLevelDB m) => RWOptions -> m a -> m a
+withOptions opts ma =
+    withDBContext (\dbc -> dbc { dbcRWOptions = opts }) ma
 
 -- | Put a value in the current DB and KeySpace
 put :: (MonadLevelDB m) => Key -> Value -> m ()
@@ -364,7 +371,7 @@ queryCount = queryBegins { scanInit = 0
 -- Also returns the KeySpaceId which would be required to operate on
 -- entries in a managed KeySpace. Append this to the front of your keys before inserting
 -- and remove it (drop 4) when reading.
-getDB :: (MonadLevelDB m) => m (DB, KeySpaceId, (ReadOptions, WriteOptions))
+getDB :: (MonadLevelDB m) => m (DB, KeySpaceId, RWOptions)
 getDB = liftLevelDBT $ asksLDB (\dbc ->
         (dbcDb dbc, dbcKsId dbc, dbcRWOptions dbc))
 
