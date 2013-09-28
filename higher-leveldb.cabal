@@ -2,9 +2,9 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                higher-leveldb
-version:             0.0.2.2
-synopsis:            A rich monadic API for working with leveldb databases (uses leveldb-haskell bindings).
--- description:         
+version:             0.1.0.0
+synopsis:            A rich monadic API for working with leveldb databases.
+description:         A rich monadic API for working with leveldb databases.
 homepage:            https://github.com/jeremyjh/higher-leveldb
 license:             BSD3
 license-file:        LICENSE
