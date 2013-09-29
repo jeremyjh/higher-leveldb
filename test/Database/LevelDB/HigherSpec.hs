@@ -84,6 +84,13 @@ spec = do
                         deleteB "\2"
                     scan "" queryCount
                `shouldReturn` 2
+            it "will do consistent reads in a snapshot" $ do
+                runCreateLevelDB testDB "snapshot" $ do
+                    put "first" "initial value"
+                    withSnapshot $ do
+                        put "first" "don't see me"
+                        get "first"
+                `shouldReturn` Just "initial value"
         describe "can be used in a custom MonadT stack" $ do
             it "can be used with a reader" $ do
                 runTestAppR testDB "TestAppReader" $ do

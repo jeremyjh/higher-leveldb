@@ -31,15 +31,17 @@ module Database.LevelDB.Higher
     , runBatch, putB, deleteB
     -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
+    -- * Context modifiers
+    , withKeySpace, withOptions, withSnapshot
+    , forkLevelDB
     -- * Monadic Types and Operations
     , MonadLevelDB(..), LevelDBT, LevelDB
     , mapLevelDBT
     , runLevelDB, runLevelDB', runCreateLevelDB
-    , withKeySpace, withOptions
-    , forkLevelDB
     -- * Re-exports
     , runResourceT
-    , Options(..), ReadOptions(..), WriteOptions(..), WriteBatch, def
+    , Options(..), ReadOptions(..), WriteOptions(..), RWOptions
+    , WriteBatch, def
     , MonadUnsafeIO, MonadThrow, MonadResourceBase
     ) where
 
@@ -60,7 +62,8 @@ import           Data.Serialize                    (encode, decode)
 
 import           Data.Default                      (def)
 import qualified Database.LevelDB                  as LDB
-import           Database.LevelDB                  hiding (put, get, delete, write)
+import           Database.LevelDB
+    hiding (put, get, delete, write, withSnapshot)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Trans.Control
 
@@ -198,6 +201,10 @@ INST(Monoid w, Strict.RWST r w s, Strict.mapRWST)
 type LevelDB a = LevelDBT IO a
 
 -- |Build a context and execute the actions; uses a 'ResourceT' internally.
+--
+-- tip: you can use the Data.Default (def) method to specify default options e.g.
+--
+-- > runLevelDB "/tmp/mydb" def (def, def{sync = true}) "My Keyspace" $ do
 runLevelDB :: (MonadResourceBase m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
@@ -246,7 +253,15 @@ forkLevelDB ma = liftLevelDB $ LevelDBT $
         (\rt -> resourceForkIO rt) $
         unLevelDBT ma
 
--- | Local keyspace for the action.
+-- | Use a local keyspace for the operation. e.g.:
+--
+-- > runCreateLevelDB "/tmp/mydb" "MyKeySpace" $ do
+-- >    put "somekey" "somevalue"
+-- >    withKeySpace "Other KeySpace" $ do
+-- >        put "somekey" "someother value"
+-- >    get "somekey"
+-- >
+-- > Just "somevalue"
 withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
 withKeySpace ks ma = do
     ksId <- getKeySpaceId ks
@@ -256,6 +271,23 @@ withKeySpace ks ma = do
 withOptions :: (MonadLevelDB m) => RWOptions -> m a -> m a
 withOptions opts =
     withDBContext (\dbc -> dbc { dbcRWOptions = opts })
+
+-- | Run a block of get operations based on a single snapshot taken at
+-- the beginning of the action. The snapshot will be automatically
+-- released when complete.
+--
+-- This means that you can do put operations in the same block, but you will not see
+-- those changes inside this computation.
+withSnapshot :: (MonadLevelDB m) => m a -> m a
+withSnapshot ma = do
+    (db, _, _) <- getDB
+    LDB.withSnapshot db $ \ss ->
+        withDBContext (\dbc -> dbc {dbcRWOptions = setSnap dbc ss}) ma
+  where
+    setSnap dbc ss =
+        let (ropts, wopts) = dbcRWOptions dbc in
+        (ropts {useSnapshot = Just ss}, wopts)
+
 
 -- | Put a value in the current DB and KeySpace.
 put :: (MonadLevelDB m) => Key -> Value -> m ()
