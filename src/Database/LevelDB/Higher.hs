@@ -239,7 +239,7 @@ runCreateLevelDB :: (MonadResourceBase m)
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> m a
-runCreateLevelDB path ks ma = runLevelDB path def{createIfMissing=True} def ks ma
+runCreateLevelDB path = runLevelDB path def{createIfMissing=True} def
 
 
 -- | Fork a LevelDBT IO action and return ThreadId into the current monad.
@@ -249,9 +249,7 @@ forkLevelDB :: (MonadLevelDB m)
               => LevelDB ()
               -> m ThreadId
 forkLevelDB ma = liftLevelDB $ LevelDBT $
-    mapReaderT
-        (\rt -> resourceForkIO rt) $
-        unLevelDBT ma
+    mapReaderT resourceForkIO $ unLevelDBT ma
 
 -- | Use a local keyspace for the operation. e.g.:
 --
