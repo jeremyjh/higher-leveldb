@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#manually upload docs to hackage
+#required because hackage build server doesnt have leveldb.so
+
+#args $1 = version
+#     $2 = hackage password
+
+cabal haddock
+cd dist/doc/html
+mv higher-leveldb higher-leveldb-$1-docs
+tar --format=ustar -czf higher-leveldb-$1-docs.tar.gz higher-leveldb-$1-docs/
+
+curl -X PUT \                                                                                                                               <<<*/
+	-H "Content-Type: application/x-tar" \
+	-H "Content-Encoding: gzip" \
+	http://jeremyjh:$2@hackage.haskell.org/package/higher-leveldb-$1/docs \
+	--data-binary @higher-leveldb-$1-docs.tar.gz
+cd ../../..
