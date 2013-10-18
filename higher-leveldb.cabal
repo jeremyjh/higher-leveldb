@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                higher-leveldb
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            A rich monadic API for working with leveldb databases.
 description:         A rich monadic API for working with leveldb databases.
 homepage:            https://github.com/jeremyjh/higher-leveldb
@@ -41,6 +41,7 @@ test-suite spec
   main-is:           Spec.hs
   build-depends:     base == 4.*
                    , higher-leveldb
+                   , cereal 
                    , hspec >= 1.5
                    , resourcet
                    , leveldb-haskell

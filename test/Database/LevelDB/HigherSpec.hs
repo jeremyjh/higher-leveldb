@@ -4,6 +4,7 @@
 module Database.LevelDB.HigherSpec (main, spec) where
 
 import qualified Data.ByteString                  as BS
+import           Data.Serialize                   (encode)
 import           Data.Monoid
 import           Test.Hspec
 import           System.Process(system)
@@ -132,6 +133,13 @@ spec = do
                     threadDelay 100
                     get "three"
                 `shouldReturn` Just "a string value to read"
+            it "scans with a keyspace" $ do
+                withDBT $ withKeySpace "overflow" $ do
+                    forM ([1..10] :: [Int]) $ \i -> do
+                        put (encode i) "hi guys"
+                    xs <- scan "" queryItems
+                    return $ length xs
+                `shouldReturn` 10
 
 
 testDB = "/tmp/leveltest"
