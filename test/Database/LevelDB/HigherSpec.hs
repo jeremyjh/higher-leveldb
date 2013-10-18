@@ -4,6 +4,8 @@
 module Database.LevelDB.HigherSpec (main, spec) where
 
 import qualified Data.ByteString                  as BS
+import           Data.ByteString                  (ByteString)
+import           Data.Serialize                  (decode)
 import           Data.Monoid
 import           Test.Hspec
 import           System.Process(system)
@@ -14,11 +16,18 @@ import           Control.Monad.Writer
 import           Control.Applicative              (Applicative)
 import           Control.Monad.Base               (MonadBase(..))
 import           Control.Concurrent.Lifted
+import           Data.Serialize (encode)
 
 --debug
 import           Debug.Trace
 debug :: (Show a) => a -> a
 debug a = traceShow a a
+
+debugKSID :: ByteString -> ByteString
+debugKSID a = traceShow (debugKeySpaceId a) a
+    where
+        debugKeySpaceId :: ByteString -> Int
+        debugKeySpaceId bs = let (Right i) = decode bs in i
 --debug
 
 
@@ -26,7 +35,7 @@ main :: IO ()
 main = hspec spec
 
 setup :: IO ()
-setup = system ("rm -rf " <> testDB) >> return ()
+setup = void $ system ("rm -rf " <> testDB)
 
 spec :: Spec
 spec = do
@@ -35,27 +44,32 @@ spec = do
             it "can put" $ do
                 withDBT $ put "putgetkey" "putgetvalue"
                 `shouldReturn` ()
+
             it "can get" $ do
                 withDBT $ get "putgetkey"
                 `shouldReturn` (Just "putgetvalue")
+
             it "can delete" $ do
                 withDBRT $ do
                     put "deletekey" "doesn't matter"
                     delete "deletekey"
                     get "deletekey"
                 `shouldReturn` Nothing
+
             it "can isolate data with keyspaces" $ do
                 runCreateLevelDB testDB "thespace" $ do
                     put "thekey" "thevalue"
                     withKeySpace "otherspace" $ put "thekey" "othervalue"
                     get "thekey"
                 `shouldReturn` (Just "thevalue")
+
             it "can override read/write options locally" $ do
                 withDBT $ do
                     withOptions (def, def {sync = True}) $ do
                         put "puttingsync" "can't you tell?"
                         get "puttingsync"
                 `shouldReturn` Just "can't you tell?"
+
             it "can scan and transform" $ do
                 runCreateLevelDB testDB "scan" $ do
                     put "employee:1" "Jill"
@@ -75,6 +89,7 @@ spec = do
                                , [ "Jill Smith", "Jack Smith"]
                                , [("employee:1", "Jill")]
                                , 148)
+
             it "can write data in batches" $ do
                 runLevelDB testDB dbOpts def "batches" $ do
                     runBatch $ do
@@ -84,6 +99,7 @@ spec = do
                         deleteB "\2"
                     scan "" queryCount
                `shouldReturn` 2
+
             it "will do consistent reads in a snapshot" $ do
                 runCreateLevelDB testDB "snapshot" $ do
                     put "first" "initial value"
@@ -91,6 +107,7 @@ spec = do
                         put "first" "don't see me"
                         get "first"
                 `shouldReturn` Just "initial value"
+
         describe "can be used in a custom MonadT stack" $ do
             it "can be used with a reader" $ do
                 runTestAppR testDB "TestAppReader" $ do
@@ -98,6 +115,7 @@ spec = do
                     put "thiskey" value
                     get "thiskey"
                 `shouldReturn` (Just "a string value to read")
+
             it "still works withKeySpace" $ do
                 runTestAppR testDB "TestAppReader" $ do
                     withKeySpace "TestAppReader2" $ do
@@ -105,6 +123,7 @@ spec = do
                         gotit <- ask -- our top Reader still works
                         return (notit, gotit)
                 `shouldReturn` (Nothing, "a string value to read")
+
             it "can be used with a writer" $ do
                 runTestAppW testDB "TestAppWriter" $ do
                     put "writekey" "words"
@@ -114,6 +133,7 @@ spec = do
                         tell "twice"
                     get "writekey"
                 `shouldReturn` (Just "words", "toljatwice")
+
             it "can work with a reader/writer" $ do
                 runTestAppRW testDB "TestAppRW" $ do
                     v <- ask
@@ -122,6 +142,7 @@ spec = do
                     get "writekey"
                 `shouldReturn` (Just "a different string value to read"
                                , "toljer")
+
             it "can get forked" $ do
                 runTestAppR testDB "forkInReader" $ do
                     put "onetwo" "three"
@@ -129,9 +150,17 @@ spec = do
                         rv <- ask
                         threadDelay 1
                         put "three" rv
-                    threadDelay 100
+                    threadDelay 20000 --fiddlesome - if test fails bump it up
                     get "three"
                 `shouldReturn` Just "a string value to read"
+
+            it "scans with a keyspace" $ do
+                withDBT $ withKeySpace "overflow" $ do
+                    forM ([1..10] :: [Int]) $ \i -> do
+                        put (encode i) "hi guys"
+                    xs <- scan "" queryItems
+                    return $ length xs
+                `shouldReturn` 10
 
 
 testDB = "/tmp/leveltest"
@@ -157,9 +186,7 @@ runTestAppRW path ks ta = runLevelDB path dbOpts def ks $ do
 
 forkTestAppR :: TestAppR () -> TestAppR ThreadId
 forkTestAppR ma = TestAppR $
-    mapReaderT
-        (\ld -> forkLevelDB ld)
-        (unTestAppR ma)
+    mapReaderT forkLevelDB $ unTestAppR ma
 
 
 newtype TestAppR a = TestAppR { unTestAppR :: ReaderT BS.ByteString (LevelDBT IO) a}

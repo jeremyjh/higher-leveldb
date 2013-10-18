@@ -19,6 +19,7 @@ library
 
   ghc-options:         -Wall
   exposed-modules:     Database.LevelDB.Higher
+                     , Database.LevelDB.Higher.Store
   -- other-modules:       
   hs-source-dirs:      src
   build-depends:       base == 4.* 
@@ -42,6 +43,7 @@ test-suite spec
   main-is:           Spec.hs
   build-depends:     base == 4.*
                    , higher-leveldb
+                   , cereal 
                    , hspec >= 1.5
                    , resourcet
                    , leveldb-haskell

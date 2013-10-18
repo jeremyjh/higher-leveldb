@@ -465,11 +465,14 @@ defaultKeySpaceId = "\0\0\0\0"
 systemKeySpaceId ::  KeySpaceId
 systemKeySpaceId = "\0\0\0\1"
 
+systemKeySpace :: KeySpace
+systemKeySpace = "system"
+
 getKeySpaceId :: (MonadLevelDB m) => KeySpace -> m KeySpaceId
 getKeySpaceId ks
     | ks == ""  = return defaultKeySpaceId
-    | ks == "system" = return systemKeySpaceId
-    | otherwise = liftLevelDB $ do
+    | ks == systemKeySpace = return systemKeySpaceId
+    | otherwise = liftLevelDB $ withKeySpace systemKeySpace $ do
         findKS <- get $ "keyspace:" <> ks
         case findKS of
             (Just foundId) -> return foundId
