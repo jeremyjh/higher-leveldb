@@ -119,10 +119,11 @@ spec = do
             it "still works withKeySpace" $ do
                 runTestAppR testDB "TestAppReader" $ do
                     withKeySpace "TestAppReader2" $ do
+                        ks <- currentKeySpace -- why not test this here
                         notit <- get "thiskey" -- not found in this keyspace
                         gotit <- ask -- our top Reader still works
-                        return (notit, gotit)
-                `shouldReturn` (Nothing, "a string value to read")
+                        return (notit, gotit, ks)
+                `shouldReturn` (Nothing, "a string value to read", "TestAppReader2")
 
             it "can be used with a writer" $ do
                 runTestAppW testDB "TestAppWriter" $ do
@@ -156,8 +157,12 @@ spec = do
 
             it "scans with a keyspace" $ do
                 withDBT $ withKeySpace "overflow" $ do
-                    forM ([1..10] :: [Int]) $ \i -> do
-                        put (encode i) "hi guys"
+                    put "thekey" "hi guys"
+                    runBatch $ do
+                        Just hi <- get "thekey"
+                        forM_ ([1..10] :: [Int]) $ \i -> do
+                            putB (encode i) hi
+                        deleteB "thekey"
                     xs <- scan "" queryItems
                     return $ length xs
                 `shouldReturn` 10

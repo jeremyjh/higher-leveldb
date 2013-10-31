@@ -32,7 +32,7 @@ module Database.LevelDB.Higher
     -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     -- * Context modifiers
-    , withKeySpace, withOptions, withSnapshot
+    , withKeySpace, withOptions, withSnapshot, currentKeySpace
     , forkLevelDB
     -- * Monadic Types and Operations
     , MonadLevelDB(..), LevelDBT, LevelDB
@@ -119,6 +119,7 @@ data DBContext = DBC { dbcDb :: DB
                      , dbcKsId :: KeySpaceId
                      , dbcSyncMV :: MVar Word32
                      , dbcRWOptions :: RWOptions
+                     , dbcKeySpace :: KeySpace
                      }
 instance Show (DBContext) where
     show = (<>) "KeySpaceID: " . show . dbcKsId
@@ -227,11 +228,11 @@ runLevelDB' path dbopt rwopt ks ma = do
     db <- openDB
     mv <- newMVar 0
     ksId <- withSystemContext db mv $ getKeySpaceId ks
-    runReaderT (unLevelDBT ma) (DBC db ksId mv rwopt)
+    runReaderT (unLevelDBT ma) (DBC db ksId mv rwopt ks)
   where
     openDB = LDB.open path dbopt
     withSystemContext db mv sctx =
-        runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt
+        runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt systemKeySpaceId
 
 -- | A helper for runLevelDB using default 'Options' except createIfMissing=True
 runCreateLevelDB :: (MonadResourceBase m)
@@ -263,7 +264,8 @@ forkLevelDB ma = liftLevelDB $ LevelDBT $
 withKeySpace :: (MonadLevelDB m) => KeySpace -> m a -> m a
 withKeySpace ks ma = do
     ksId <- getKeySpaceId ks
-    withDBContext (\dbc -> dbc { dbcKsId = ksId}) ma
+    withDBContext (\dbc -> dbc { dbcKsId = ksId
+                               , dbcKeySpace = ks}) ma
 
 -- | Local Read/Write Options for the action.
 withOptions :: (MonadLevelDB m) => RWOptions -> m a -> m a
@@ -446,6 +448,9 @@ mapLevelDBT f ma = LevelDBT $
 getDB :: (MonadLevelDB m) => m (DB, KeySpaceId, RWOptions)
 getDB = liftLevelDB $ asksLDB (\dbc ->
         (dbcDb dbc, dbcKsId dbc, dbcRWOptions dbc))
+
+currentKeySpace :: (MonadLevelDB m) => m KeySpace
+currentKeySpace = liftLevelDB $ asksLDB dbcKeySpace
 
 
 -- | This little dance with asksLDB & localLDB let's us get away from
