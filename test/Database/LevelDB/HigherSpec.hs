@@ -100,6 +100,16 @@ spec = do
                     scan "" queryCount
                `shouldReturn` 2
 
+            it "can write data in IO batches" $ do
+                runLevelDB testDB dbOpts def "batches" $ do
+                    runBatchIO $ do
+                        putB "\1" "first"
+                        putB "\2" "second"
+                        put "\3" "third" -- not in Batch!!
+                        deleteB "\2"
+                    scan "" queryCount
+               `shouldReturn` 2
+
             it "will do consistent reads in a snapshot" $ do
                 runCreateLevelDB testDB "snapshot" $ do
                     put "first" "initial value"
@@ -157,12 +167,9 @@ spec = do
 
             it "scans with a keyspace" $ do
                 withDBT $ withKeySpace "overflow" $ do
-                    put "thekey" "hi guys"
                     runBatch $ do
-                        Just hi <- get "thekey"
                         forM_ ([1..10] :: [Int]) $ \i -> do
-                            putB (encode i) hi
-                        deleteB "thekey"
+                            putB (encode i) "hi guys"
                     xs <- scan "" queryItems
                     return $ length xs
                 `shouldReturn` 10

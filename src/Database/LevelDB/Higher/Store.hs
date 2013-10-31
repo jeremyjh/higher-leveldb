@@ -31,9 +31,9 @@ store k s = put k (encode s)
 
 -- | Store the object in the database - batch mode with 'runBatch'
 --
-storeB :: (MonadLevelDB m, Storeable a)
+storeB :: (Monad m, Storeable a)
        => Key
-       -> a -> WriterT WriteBatch m ()
+       -> a -> BatchWriter m
 storeB k s = putB k (encode s)
 
 -- | Fetch the 'Storeable' from the database

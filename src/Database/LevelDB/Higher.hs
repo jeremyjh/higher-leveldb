@@ -28,7 +28,7 @@ module Database.LevelDB.Higher
     -- * Basic operations
     , get, put, delete
     -- * Batch operations
-    , runBatch, putB, deleteB
+    , runBatch, runBatchIO, putB, deleteB, BatchWriter
     -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     -- * Context modifiers
@@ -48,6 +48,7 @@ module Database.LevelDB.Higher
 
 import           Control.Monad.Reader
 import           Control.Monad.Writer
+import           Control.Monad.Identity
 import           Data.Word                         (Word32)
 
 import           Control.Applicative               (Applicative)
@@ -310,30 +311,45 @@ delete k = do
     let packed = ksId <> k
     LDB.delete db wopt packed
 
--- | Write a batch of operations - use the 'write' and 'deleteB' functions to
--- add operations to the batch list.
+type BatchWriter m = ReaderT KeySpaceId (WriterT WriteBatch m) ()
+
+-- | Write an atomic batch of operations - use the 'putB' and 'deleteB' functions to
+-- add operations to the batch list. This is the "pure" version - use 'runBatchIO'
+-- if you need to execute LevelDB or other IO actions in the same block.
 runBatch :: (MonadLevelDB m)
-          => WriterT WriteBatch m ()
-          -> m ()
-runBatch wb = do
-    (db, _, (_, wopt)) <- getDB
-    (_, ops) <- runWriterT wb
+         => BatchWriter Identity
+         -> m ()
+runBatch bw = do
+    (db, ksId, (_, wopt)) <- getDB
+    let wtr = runReaderT bw ksId
+    let ops = execWriter wtr
     LDB.write db wopt ops
 
--- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch'.
-putB :: (MonadLevelDB m) => Key -> Value -> WriterT WriteBatch m ()
+-- | Write an atomic batch of operations - use the 'putB' and 'deleteB' functions to
+-- add operations to the batch list. Use this version if you need to execute LevelDB
+-- or other IO actions in the same block. This may be required for example if you are
+-- building a batch from an I/O stream. Where possible use 'runBatch' as it will prevent
+-- mistakenly using the standalone put/delete functions in what you think is an atomic batch.
+runBatchIO :: (MonadLevelDB m)
+           => BatchWriter m
+           -> m ()
+runBatchIO bw = do
+    (db, ksId, (_, wopt)) <- getDB
+    let wtr = runReaderT bw ksId
+    ops <- execWriterT wtr
+    LDB.write db wopt ops
+
+-- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch' and 'runBatchIO'.
+putB :: (Monad m) => Key -> Value -> BatchWriter m
 putB k v = do
-    (_, ksId, _) <- getDB
+    ksId <- ask
     tell [Put (ksId <> k) v]
-    return ()
 
 -- | Add a "Del" operation to a WriteBatch -- for use with 'runBatch'.
-deleteB :: (MonadLevelDB m) => Key -> WriterT WriteBatch m ()
+deleteB :: (Monad m) => Key -> BatchWriter m
 deleteB k = do
-    (_, ksId, _) <- getDB
+    ksId <- ask
     tell [Del (ksId <> k)]
-    return ()
-
 
 -- | Scan the keyspace, applying functions and returning results.
 -- Look at the documentation for 'ScanQuery' for more information.
