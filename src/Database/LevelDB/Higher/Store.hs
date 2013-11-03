@@ -7,10 +7,9 @@ module Database.LevelDB.Higher.Store
     , FetchFail(..), Storeable
     ) where
 
-import           Data.ByteString
-import           Data.Typeable
-import           Control.Monad.Writer
-import           Database.LevelDB.Higher
+import           Database.LevelDB.Higher.Core
+import           Data.ByteString          (ByteString)
+import           Data.Typeable            (Typeable)
 import           Data.Serialize           hiding (get, put)
 import           Data.SafeCopy            (SafeCopy(..))
 
