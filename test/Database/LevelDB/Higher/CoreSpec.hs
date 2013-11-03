@@ -90,23 +90,15 @@ spec = do
 
             it "can write data in batches" $ do
                 runLevelDB testDB dbOpts def "batches" $ do
-                    runBatch $ do
-                        putB "\1" "first"
-                        putB "\2" "second"
-                        putB "\3" "third"
-                        deleteB "\2"
-                    scan "" queryCount
-               `shouldReturn` 2
-
-            it "can write data in IO batches" $ do
-                runLevelDB testDB dbOpts def "batches" $ do
-                    runBatchIO $ do
-                        putB "\1" "first"
-                        putB "\2" "second"
-                        put "\3" "third" -- not in Batch!!
-                        deleteB "\2"
-                    scan "" queryCount
-               `shouldReturn` 2
+                    value <- runBatch $ do
+                                put "\1" "first"
+                                put "\2" "second"
+                                put "\3" "third"
+                                delete "\2"
+                                get "\3" -- won't see this in the batch
+                    count <- scan "" queryCount
+                    return (value, count)
+               `shouldReturn` (Nothing, 2)
 
             it "will do consistent reads in a snapshot" $ do
                 runCreateLevelDB testDB "snapshot" $ do
@@ -120,7 +112,7 @@ spec = do
                 withDBT $ withKeySpace "overflow" $ do
                     runBatch $ do
                         forM_ ([1..10] :: [Int]) $ \i -> do
-                            putB (encode i) "hi guys"
+                            put (encode i) "hi guys"
                     xs <- scan "" queryItems
                     return $ length xs
                 `shouldReturn` 10

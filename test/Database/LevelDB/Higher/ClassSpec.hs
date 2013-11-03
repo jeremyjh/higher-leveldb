@@ -56,8 +56,9 @@ spec = do
             it "can work with a reader/writer" $ do
                 runTestAppRW testDB "TestAppRW" $ do
                     v <- ask
-                    put "writekey" v
-                    tell "toljer"
+                    runBatch $ do
+                        put "writekey" v
+                        lift $ tell "toljer" -- lift over the BatchWriterT
                     get "writekey"
                 `shouldReturn` (Just "a different string value to read"
                                , "toljer")

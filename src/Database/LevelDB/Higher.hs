@@ -11,13 +11,16 @@
 
 module Database.LevelDB.Higher
     (
-      module X
+      -- $intro
+      -- * Introduction
+      MonadLevelDB(..)
+    , module X
     ) where
 
 import Database.LevelDB.Higher.Core as X
 import Database.LevelDB.Higher.Store as X
 
-    -- * Introduction
+-- $intro
 -- Operations take place within a 'MonadLevelDB' which is built with the LevelDBT transformer; the most
 -- basic type would be 'LevelDBT' 'IO' which is type aliased as 'LevelDB'. The basic operations are
 -- the same as the underlying leveldb-haskell versions except that the DB and Options arguments are

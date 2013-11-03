@@ -8,14 +8,11 @@ module Database.LevelDB.Higher.Core
     (
     -- * Basic types
       Key, Value, Item, KeySpace, KeySpaceId
-    -- * Basic operations
-    , get, put, delete
     -- * Batch operations
-    , runBatch, runBatchIO, putB, deleteB, BatchWriter
     -- * Scans
     , scan, ScanQuery(..), queryItems, queryList, queryBegins, queryCount
     -- * Context modifiers
-    , withKeySpace, withOptions, withSnapshot, currentKeySpace
+    , withKeySpace, withOptions, withSnapshot, currentKeySpace, runBatch
     , forkLevelDB
     -- * Monadic Types and Operations
     , MonadLevelDB(..), LevelDBT, LevelDB
@@ -33,7 +30,6 @@ import           Database.LevelDB.Higher.Class
 
 import           Control.Monad.Reader
 import           Control.Monad.Writer
-import           Control.Monad.Identity
 import           Data.Word                         (Word32)
 
 
@@ -50,8 +46,25 @@ import           Database.LevelDB
 import           Control.Monad.Trans.Resource
 
 
+-- Primary instance definition - used for all operations other than 'runBatch'
 instance (MonadResourceBase m) => MonadLevelDB (LevelDBT m) where
+    get k = do
+        (db, ksId, (ropt, _)) <- getDB
+        let packed = ksId <> k
+        LDB.get db ropt packed
+
+    put k v = do
+        (db, ksId, (_, wopt)) <- getDB
+        let packed = ksId <> k
+        LDB.put db wopt packed v
+
+    delete k = do
+        (db, ksId, (_, wopt)) <- getDB
+        let packed = ksId <> k
+        LDB.delete db wopt packed
+
     liftLevelDB = mapLevelDBT liftIO
+
     withDBContext = localLDB
 
 
@@ -95,6 +108,44 @@ runCreateLevelDB :: (MonadResourceBase m)
            -> LevelDBT m a -- ^ The actions to execute
            -> m a
 runCreateLevelDB path = runLevelDB path def{createIfMissing=True} def
+
+-- | Write an atomic batch of operations created with a BatchWriterT block.
+--  In the BatchWriterT monad 'put' and 'delete' will collect BatchOp commands in a Writer.
+-- 'get' works the same as in LevelDB monad - this means a 'get' inside a
+-- runBatch block will not see changes made with 'put' in that same block.
+--
+-- > runBatch $ do
+-- >     put "key1" "value1"
+-- >     put "key2" "value2"
+-- >     delete "someotherkey"
+-- >     get "key1"
+-- >
+-- >Nothing
+runBatch :: (MonadLevelDB m)
+         => BatchWriterT m a
+         -> m a
+runBatch bw = do
+    (db, _, (_, wopt)) <- getDB
+    (v, ops) <- runWriterT (unBatchWriterT bw)
+    LDB.write db wopt ops
+    return v
+
+-- Instance used for 'runBatch'
+instance (MonadLevelDB m) => MonadLevelDB (BatchWriterT m) where
+    get = lift . get
+
+    put k v = do
+        (_, ksId, _) <- getDB
+        tell [Put (ksId <> k) v]
+
+    delete k = do
+        (_, ksId, _) <- getDB
+        tell [Del (ksId <> k)]
+
+    liftLevelDB = lift . liftLevelDB
+
+    withDBContext f ma =
+        BatchWriterT $ mapWriterT (withDBContext f) (unBatchWriterT ma)
 
 
 -- | Fork a LevelDBT IO action and return ThreadId into the current monad.
@@ -142,67 +193,6 @@ withSnapshot ma = do
         let (ropts, wopts) = dbcRWOptions dbc in
         (ropts {useSnapshot = Just ss}, wopts)
 
-
--- | Put a value in the current DB and KeySpace.
-put :: (MonadLevelDB m) => Key -> Value -> m ()
-put k v = do
-    (db, ksId, (_, wopt)) <- getDB
-    let packed = ksId <> k
-    LDB.put db wopt packed v
-
--- | Get a value from the current DB and KeySpace.
-get :: (MonadLevelDB m) => Key -> m (Maybe Value)
-get k = do
-    (db, ksId, (ropt, _)) <- getDB
-    let packed = ksId <> k
-    LDB.get db ropt packed
-
--- | Delete an entry from the current DB and KeySpace.
-delete :: (MonadLevelDB m) => Key -> m ()
-delete k = do
-    (db, ksId, (_, wopt)) <- getDB
-    let packed = ksId <> k
-    LDB.delete db wopt packed
-
-type BatchWriter m = ReaderT KeySpaceId (WriterT WriteBatch m) ()
-
--- | Write an atomic batch of operations - use the 'putB' and 'deleteB' functions to
--- add operations to the batch list. This is the "pure" version - use 'runBatchIO'
--- if you need to execute LevelDB or other IO actions in the same block.
-runBatch :: (MonadLevelDB m)
-         => BatchWriter Identity
-         -> m ()
-runBatch bw = do
-    (db, ksId, (_, wopt)) <- getDB
-    let wtr = runReaderT bw ksId
-    let ops = execWriter wtr
-    LDB.write db wopt ops
-
--- | Write an atomic batch of operations - use the 'putB' and 'deleteB' functions to
--- add operations to the batch list. Use this version if you need to execute LevelDB
--- or other IO actions in the same block. This may be required for example if you are
--- building a batch from an I/O stream. Where possible use 'runBatch' as it will prevent
--- mistakenly using the standalone put/delete functions in what you think is an atomic batch.
-runBatchIO :: (MonadLevelDB m)
-           => BatchWriter m
-           -> m ()
-runBatchIO bw = do
-    (db, ksId, (_, wopt)) <- getDB
-    let wtr = runReaderT bw ksId
-    ops <- execWriterT wtr
-    LDB.write db wopt ops
-
--- | Add a "Put" operation to a WriteBatch -- for use with 'runBatch' and 'runBatchIO'.
-putB :: (Monad m) => Key -> Value -> BatchWriter m
-putB k v = do
-    ksId <- ask
-    tell [Put (ksId <> k) v]
-
--- | Add a "Del" operation to a WriteBatch -- for use with 'runBatch'.
-deleteB :: (Monad m) => Key -> BatchWriter m
-deleteB k = do
-    ksId <- ask
-    tell [Del (ksId <> k)]
 
 -- | Scan the keyspace, applying functions and returning results.
 -- Look at the documentation for 'ScanQuery' for more information.
@@ -332,21 +322,17 @@ localLDB :: (MonadResourceBase m)
          -> LevelDBT m a -> LevelDBT m a
 localLDB f ma = LevelDBT $ local f (unLevelDBT ma)
 
-
 defaultKeySpaceId :: KeySpaceId
 defaultKeySpaceId = "\0\0\0\0"
 
 systemKeySpaceId ::  KeySpaceId
 systemKeySpaceId = "\0\0\0\1"
 
-systemKeySpace :: KeySpace
-systemKeySpace = "system"
-
 getKeySpaceId :: (MonadLevelDB m) => KeySpace -> m KeySpaceId
 getKeySpaceId ks
     | ks == ""  = return defaultKeySpaceId
-    | ks == systemKeySpace = return systemKeySpaceId
-    | otherwise = liftLevelDB $ withKeySpace systemKeySpace $ do
+    | ks == systemKeySpaceId = return systemKeySpaceId
+    | otherwise = liftLevelDB $ withKeySpace systemKeySpaceId $ do
         findKS <- get $ "keyspace:" <> ks
         case findKS of
             (Just foundId) -> return foundId

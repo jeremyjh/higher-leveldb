@@ -35,27 +35,51 @@ class ( Monad m
       , MonadResource m
       , MonadBase IO m )
       => MonadLevelDB m where
-    -- | Override context for an action - only usable internally for functions
-    -- like 'withKeySpace' and 'withOptions'.
-    withDBContext :: (DBContext -> DBContext) -> m a -> m a
+    -- | Get a value from the current DB and KeySpace.
+    get :: Key -> m (Maybe Value)
+
+    -- | Put a value in the current DB and KeySpace.
+    put :: Key -> Value -> m ()
+
+    -- | Delete an entry from the current DB and KeySpace.
+    delete :: Key -> m ()
+
     -- | Lift a LevelDBT IO action into the current monad.
     liftLevelDB :: LevelDBT IO a -> m a
 
+    -- | Override context for an action - only usable internally for functions
+    -- like 'withKeySpace' and 'withOptions'.
+    withDBContext :: (DBContext -> DBContext) -> m a -> m a
+
+
 
 -- transformer instances boilerplate; "inspired" by ResourceT
-#define INST(M,T, F)                                              \
-instance (M, MonadLevelDB m) => MonadLevelDB (T m)                \
-    where                                                         \
-      liftLevelDB = lift . liftLevelDB                        ; \
-      withDBContext f = F (withDBContext f)                     ; \
+#define INST(T, F)                                             \
+instance (MonadLevelDB m) => MonadLevelDB (T m)               \
+    where                                                        \
+      get = lift . get                                         ; \
+      put k v = lift $ put k v                                 ; \
+      delete = lift . delete                                   ; \
+      liftLevelDB = lift . liftLevelDB                         ; \
+      withDBContext f = F (withDBContext f)                    ; \
 
-INST(Monad m,ReaderT r, mapReaderT) --Monad m is a no-op to save another define
-INST(Monad m,Maybe.MaybeT, Maybe.mapMaybeT)
-INST(Monad m,Identity.IdentityT, Identity.mapIdentityT)
-INST(Monad m,List.ListT, List.mapListT)
-INST(Monad m,Cont.ContT r, Cont.mapContT)
-INST(Monad m,State.StateT s, State.mapStateT )
-INST(Monad m,Strict.StateT s, Strict.mapStateT )
+INST(ReaderT r, mapReaderT)
+INST(Maybe.MaybeT, Maybe.mapMaybeT)
+INST(Identity.IdentityT, Identity.mapIdentityT)
+INST(List.ListT, List.mapListT)
+INST(Cont.ContT r, Cont.mapContT)
+INST(State.StateT s, State.mapStateT )
+INST(Strict.StateT s, Strict.mapStateT )
+#undef INST
+#define INST(M,T, F)                                             \
+instance (M, MonadLevelDB m) => MonadLevelDB (T m)               \
+    where                                                        \
+      get = lift . get                                         ; \
+      put k v = lift $ put k v                                 ; \
+      delete = lift . delete                                   ; \
+      liftLevelDB = lift . liftLevelDB                         ; \
+      withDBContext f = F (withDBContext f)                    ; \
+
 INST(Error.Error e, Error.ErrorT e, Error.mapErrorT)
 INST(Monoid w, Writer.WriterT w, Writer.mapWriterT)
 INST(Monoid w, Strict.WriterT w, Strict.mapWriterT)

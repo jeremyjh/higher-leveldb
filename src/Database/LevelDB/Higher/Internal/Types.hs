@@ -10,7 +10,6 @@ module Database.LevelDB.Higher.Internal.Types where
 
 import           Control.Monad.Reader
 import           Control.Monad.Writer
-import           Control.Monad.Identity
 import           Data.Word                         (Word32)
 
 import           Control.Applicative               (Applicative)
@@ -18,15 +17,12 @@ import           Control.Monad.Base                (MonadBase(..))
 
 import           Control.Concurrent.MVar.Lifted
 
-import qualified Data.ByteString                   as BS
 import           Data.ByteString                   (ByteString)
 
 import           Database.LevelDB
     hiding (put, get, delete, write, withSnapshot)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Trans.Control
-
-
 
 
 type Key = ByteString
@@ -64,9 +60,12 @@ instance Show (DBContext) where
 -- 'ResourceT' along with a 'DBContext' 'Reader'.
 --
 -- If you aren't building a custom monad stack you can just use the 'LevelDB' alias.
-newtype LevelDBT m a
-        =  LevelDBT { unLevelDBT :: ReaderT DBContext (ResourceT m) a }
-            deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow)
+newtype LevelDBT m a = LevelDBT
+    { unLevelDBT :: ReaderT DBContext (ResourceT m) a }
+    deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow)
+
+-- | alias for LevelDBT IO - useful if you aren't building a custom stack.
+type LevelDB a = LevelDBT IO a
 
 instance (MonadBase b m) => MonadBase b (LevelDBT m) where
     liftBase = lift . liftBase
@@ -91,5 +90,13 @@ instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
     liftBaseWith = defaultLiftBaseWith StMT
     restoreM     = defaultRestoreM unStMT
 
--- | alias for LevelDBT IO - useful if you aren't building a custom stack.
-type LevelDB a = LevelDBT IO a
+newtype BatchWriterT m a = BatchWriterT
+    {unBatchWriterT :: WriterT WriteBatch m a }
+    deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow
+             , MonadResource, MonadWriter WriteBatch)
+
+instance (MonadBase b m) => MonadBase b (BatchWriterT m) where
+    liftBase = lift . liftBase
+
+instance MonadTrans BatchWriterT where
+    lift = BatchWriterT . lift
