@@ -2,15 +2,14 @@
 
 module Database.LevelDB.Higher.Store
     ( fetch, scanFetch
-    , store, storeB
+    , store
     , decodeStore
     , FetchFail(..), Storeable
     ) where
 
-import           Data.ByteString
-import           Data.Typeable
-import           Control.Monad.Writer
-import           Database.LevelDB.Higher
+import           Database.LevelDB.Higher.Core
+import           Data.ByteString          (ByteString)
+import           Data.Typeable            (Typeable)
 import           Data.Serialize           hiding (get, put)
 import           Data.SafeCopy            (SafeCopy(..))
 
@@ -29,12 +28,6 @@ decodeStore serial =
 store :: (MonadLevelDB m, Storeable a) => Key -> a -> m ()
 store k s = put k (encode s)
 
--- | Store the object in the database - batch mode with 'runBatch'
---
-storeB :: (Monad m, Storeable a)
-       => Key
-       -> a -> BatchWriter m
-storeB k s = putB k (encode s)
 
 -- | Fetch the 'Storeable' from the database
 --

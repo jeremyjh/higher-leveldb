@@ -20,7 +20,9 @@ library
   ghc-options:         -Wall
   exposed-modules:     Database.LevelDB.Higher
                      , Database.LevelDB.Higher.Store
-  -- other-modules:       
+                     , Database.LevelDB.Higher.Core
+                     , Database.LevelDB.Higher.Class
+  other-modules:       Database.LevelDB.Higher.Internal.Types
   hs-source-dirs:      src
   build-depends:       base == 4.* 
                        , cereal 
