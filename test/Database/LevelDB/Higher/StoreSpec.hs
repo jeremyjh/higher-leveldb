@@ -75,18 +75,12 @@ aThing = Thing 42.0 "hi guys" 9.9
 
 
 data ThingV1 = ThingV1 Int String Double deriving (Typeable, Show, Eq)
-instance Serialize ThingV1 where
-    get = safeGet
-    put = safePut
 
 data Thing = Thing Double String Double deriving (Typeable, Show, Eq)
-instance Serialize Thing where
-    get = safeGet
-    put = safePut
 
 instance Migrate (Thing) where
   type MigrateFrom Thing = ThingV1
   migrate (ThingV1 i s d) = Thing (fromIntegral i) s d
 
-deriveSafeCopy 1 'base ''ThingV1
-deriveSafeCopy 2 'extension ''Thing
+deriveStorable ''ThingV1
+deriveStorableVersion 2 ''Thing

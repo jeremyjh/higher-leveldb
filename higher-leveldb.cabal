@@ -36,6 +36,7 @@ library
                        , data-default
                        , transformers
                        , safecopy
+                       , template-haskell
 
 
 test-suite spec
