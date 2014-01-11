@@ -45,7 +45,6 @@ import           Database.LevelDB
     hiding (put, get, delete, write, withSnapshot)
 import           Control.Monad.Trans.Resource
 
-
 -- Primary instance definition - used for all operations other than 'runBatch'
 instance (MonadResourceBase m) => MonadLevelDB (LevelDBT m) where
     get k = do
@@ -206,16 +205,18 @@ scan :: (MonadLevelDB m)
      -> m b
 scan k scanQuery = do
     (db, ksId, (ropt,_)) <- getDB
-    withIterator db ropt $ doScan (ksId <> k)
+    withIterator db ropt $ doScan (ksId <> k) ksId
   where
-    doScan prefix iter = do
+    doScan prefix ksId iter = do
         iterSeek iter prefix
         applyIterate initV
       where
         readItem = do
             nk <- iterKey iter
             nv <- iterValue iter
-            return (fmap (BS.drop 4) nk, nv) --unkeyspace
+            if sameKsId nk then
+                return (fmap (BS.drop 4) nk, nv) --unkeyspace
+                else return (Nothing, Nothing)
         applyIterate acc = do
             item <- readItem
             case item of
@@ -228,6 +229,8 @@ scan k scanQuery = do
                                  else items
                     else return acc
                 _ -> return acc
+        sameKsId Nothing = False
+        sameKsId (Just nk) = BS.take 4 nk == ksId
     initV = scanInit scanQuery
     whileFn = scanWhile scanQuery k
     mapFn = scanMap scanQuery
