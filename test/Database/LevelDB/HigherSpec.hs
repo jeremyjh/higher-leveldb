@@ -173,16 +173,16 @@ forkTestAppR ma = TestAppR $
 newtype TestAppR a = TestAppR { unTestAppR :: ReaderT BS.ByteString (LevelDBT IO) a}
             deriving ( Functor, Applicative, Monad, MonadBase IO
                      , MonadReader BS.ByteString, MonadResource
-                     , MonadIO, MonadThrow, MonadUnsafeIO, MonadLevelDB
+                     , MonadIO, MonadThrow, MonadLevelDB
                      )
 
 newtype TestAppW a = TestAppW { unTestAppW :: WriterT BS.ByteString (LevelDBT IO) a}
             deriving ( Functor, Applicative, Monad, MonadBase IO
                      , MonadWriter BS.ByteString, MonadResource
-                     , MonadIO, MonadThrow, MonadUnsafeIO, MonadLevelDB
+                     , MonadIO, MonadThrow, MonadLevelDB
                      )
 newtype TestAppRW a = TestAppRW { unTestAppRW :: ReaderT BS.ByteString
                                                 (WriterT BS.ByteString (LevelDBT IO)) a}
             deriving ( Functor, Applicative, Monad, MonadBase IO
                      , MonadReader BS.ByteString, MonadWriter BS.ByteString, MonadResource
-                     , MonadIO, MonadThrow, MonadUnsafeIO, MonadLevelDB)
+                     , MonadIO, MonadThrow, MonadLevelDB)
