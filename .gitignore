@@ -8,3 +8,6 @@ Session.vim
 log.txt
 report.html
 .hsenv
+.cabal-sandbox/
+cabal.sandbox.config
+tags

@@ -42,7 +42,7 @@ module Database.LevelDB.Higher
     , runResourceT
     , Options(..), ReadOptions(..), WriteOptions(..), RWOptions
     , WriteBatch, def
-    , MonadUnsafeIO, MonadThrow, MonadResourceBase
+    , MonadThrow, MonadResourceBase
     ) where
 
 
@@ -161,7 +161,6 @@ instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
 -- | MonadLevelDB class used by all the public functions in this module.
 class ( Monad m
       , MonadThrow m
-      , MonadUnsafeIO m
       , MonadIO m
       , Applicative m
       , MonadResource m
