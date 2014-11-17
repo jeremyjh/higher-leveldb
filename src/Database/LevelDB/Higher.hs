@@ -17,6 +17,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Database.LevelDB.Higher
     (
@@ -238,7 +239,7 @@ runCreateLevelDB :: (MonadResourceBase m)
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
            -> m a
-runCreateLevelDB path ks ma = runLevelDB path def{createIfMissing=True} def ks ma
+runCreateLevelDB path = runLevelDB path def{createIfMissing=True} def
 
 
 -- | Fork a LevelDBT IO action and return ThreadId into the current monad.
@@ -248,9 +249,7 @@ forkLevelDB :: (MonadLevelDB m)
               => LevelDB ()
               -> m ThreadId
 forkLevelDB ma = liftLevelDB $ LevelDBT $
-    mapReaderT
-        (\rt -> resourceForkIO rt) $
-        unLevelDBT ma
+    mapReaderT resourceForkIO (unLevelDBT ma)
 
 -- | Use a local keyspace for the operation. e.g.:
 --
@@ -344,39 +343,34 @@ scan :: (MonadLevelDB m)
      => Key  -- ^ Key at which to start the scan.
      -> ScanQuery a b -- ^ query functions to execute -- see 'ScanQuery' docs.
      -> m b
-scan k scanQuery = do
+scan k ScanQuery{..} = do
     (db, ksId, (ropt,_)) <- getDB
     withIterator db ropt $ doScan (ksId <> k) ksId
   where
     doScan prefix ksId iter = do
         iterSeek iter prefix
-        applyIterate initV
+        applyIterate scanInit
       where
         readItem = do
             nk <- iterKey iter
             nv <- iterValue iter
-            if sameKsId nk then
-                return (fmap (BS.drop 4) nk, nv) --unkeyspace
-                else return (Nothing, Nothing)
+            return $
+                if sameKsId nk then (fmap (BS.drop 4) nk, nv) --unkeyspace
+                else (Nothing, Nothing)
         applyIterate acc = do
             item <- readItem
             case item of
                 (Just nk, Just nv) ->
-                    if whileFn (nk, nv) acc then do
+                    if scanWhile k (nk, nv) acc then do
                         iterNext iter
                         items <- applyIterate acc
-                        return $ if filterFn (nk, nv) then
-                                     reduceFn (mapFn (nk, nv)) items
+                        return $ if scanFilter (nk, nv) then
+                                     scanFold (scanMap (nk, nv)) items
                                  else items
                     else return acc
                 _ -> return acc
         sameKsId Nothing = False
         sameKsId (Just nk) = BS.take 4 nk == ksId
-    initV = scanInit scanQuery
-    whileFn = scanWhile scanQuery k
-    mapFn = scanMap scanQuery
-    filterFn = scanFilter scanQuery
-    reduceFn = scanFold scanQuery
 
 -- | Structure containing functions used within the 'scan' function. You may want to start
 -- with one of the builder/helper funcions such as 'queryItems', which is defined as:
