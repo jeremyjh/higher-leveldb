@@ -144,7 +144,20 @@ instance MonadTrans LevelDBT where
 instance (MonadResourceBase m) => MonadResource (LevelDBT m) where
     liftResourceT = LevelDBT . liftResourceT
 
--- TODO: figure out what this does
+#if MIN_VERSION_monad_control(1,0,0)
+instance MonadTransControl LevelDBT where
+    type StT LevelDBT a = StT ResourceT (StT (ReaderT DBContext) a)
+    liftWith f =
+            LevelDBT $ liftWith $ \run ->
+                       liftWith $ \run' ->
+                       f $ run' . run . unLevelDBT
+    restoreT = LevelDBT . restoreT . restoreT
+
+instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
+    type StM (LevelDBT m) a =  ComposeSt LevelDBT m a
+    liftBaseWith = defaultLiftBaseWith
+    restoreM     = defaultRestoreM
+#else
 instance MonadTransControl LevelDBT where
     newtype StT LevelDBT a = StLevelDBT
             {unStLevelDBT :: StT ResourceT (StT (ReaderT DBContext) a) }
@@ -158,6 +171,7 @@ instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
     newtype StM (LevelDBT m) a =  StMT {unStMT :: ComposeSt LevelDBT m a}
     liftBaseWith = defaultLiftBaseWith StMT
     restoreM     = defaultRestoreM unStMT
+#endif
 
 -- | MonadLevelDB class used by all the public functions in this module.
 class ( Monad m

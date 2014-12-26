@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                higher-leveldb
-version:             0.2.0.0
+version:             0.2.1.0
 synopsis:            A rich monadic API for working with leveldb databases.
 description:         A rich monadic API for working with leveldb databases.
 homepage:            https://github.com/jeremyjh/higher-leveldb
@@ -15,6 +15,10 @@ category:            Database
 build-type:          Simple
 cabal-version:       >=1.8
 
+source-repository head
+  type:     git
+  location: git://github.com/jeremyjh/higher-leveldb.git
+
 library
 
   ghc-options:         -Wall
@@ -22,16 +26,16 @@ library
   -- other-modules:       
   hs-source-dirs:      src
   build-depends:       base == 4.* 
-                       , cereal 
-                       , lifted-base
+                       , cereal  >= 0.4 && < 0.5
+                       , lifted-base >= 0.2.1.1 && < 0.3
                        , leveldb-haskell >= 0.2 && <= 0.7
-                       , bytestring
+                       , bytestring >= 0.10 && < 0.11
                        , resourcet       >=  1.1.0 && <= 1.2
-                       , transformers-base
-                       , mtl
-                       , monad-control
-                       , data-default
-                       , transformers
+                       , transformers-base >= 0.4.1 && < 0.5
+                       , mtl >= 2.0 && < 2.2
+                       , monad-control >= 0.3 && < 1.1
+                       , data-default >= 0.5.1 && < 0.6
+                       , transformers >= 0.3 && < 0.5
 
 
 test-suite spec
