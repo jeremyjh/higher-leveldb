@@ -51,7 +51,9 @@ import           Control.Monad.Reader
 import           Control.Monad.Writer
 import           Data.Word                         (Word32)
 
+#if !MIN_VERSION_base(4,8,0)
 import           Control.Applicative               (Applicative)
+#endif
 import           Control.Monad.Base                (MonadBase(..))
 
 import           Control.Concurrent.MVar.Lifted
@@ -69,11 +71,16 @@ import           Control.Monad.Trans.Resource
 import           Control.Monad.Trans.Control
 
 
+#if MIN_VERSION_mtl(2,2,1)
+import qualified Control.Monad.Except              as Except
+#else
+import qualified Control.Monad.Trans.Error as Error
+#endif
+
 import qualified Control.Monad.Trans.Cont          as Cont
 import qualified Control.Monad.Trans.Identity      as Identity
 import qualified Control.Monad.Trans.List          as List
 import qualified Control.Monad.Trans.Maybe         as Maybe
-import qualified Control.Monad.Trans.Error         as Error
 import qualified Control.Monad.Trans.State         as State
 import qualified Control.Monad.Trans.Writer        as Writer
 import qualified Control.Monad.Trans.RWS           as RWS
@@ -205,11 +212,17 @@ INST(Monad m,List.ListT, List.mapListT)
 INST(Monad m,Cont.ContT r, Cont.mapContT)
 INST(Monad m,State.StateT s, State.mapStateT )
 INST(Monad m,Strict.StateT s, Strict.mapStateT )
-INST(Error.Error e, Error.ErrorT e, Error.mapErrorT)
 INST(Monoid w, Writer.WriterT w, Writer.mapWriterT)
 INST(Monoid w, Strict.WriterT w, Strict.mapWriterT)
 INST(Monoid w, RWS.RWST r w s, RWS.mapRWST)
 INST(Monoid w, Strict.RWST r w s, Strict.mapRWST)
+
+#if MIN_VERSION_mtl(2,2,1)
+INST(Except.MonadError e m, Except.ExceptT e, Except.mapExceptT)
+#else
+INST(Error.Error e, Error.ErrorT e, Error.mapErrorT)
+#endif
+
 #undef INST
 -- | alias for LevelDBT IO - useful if you aren't building a custom stack.
 type LevelDB a = LevelDBT IO a
