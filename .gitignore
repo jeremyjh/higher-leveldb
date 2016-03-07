@@ -11,3 +11,4 @@ report.html
 .cabal-sandbox/
 cabal.sandbox.config
 tags
+.stack-work
