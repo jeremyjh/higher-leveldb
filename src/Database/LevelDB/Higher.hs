@@ -218,7 +218,7 @@ INST(Monoid w, RWS.RWST r w s, RWS.mapRWST)
 INST(Monoid w, Strict.RWST r w s, Strict.mapRWST)
 
 #if MIN_VERSION_mtl(2,2,1)
-INST(Except.MonadError e m, Except.ExceptT e, Except.mapExceptT)
+INST(Monad m, Except.ExceptT e, Except.mapExceptT)
 #else
 INST(Error.Error e, Error.ErrorT e, Error.mapErrorT)
 #endif
