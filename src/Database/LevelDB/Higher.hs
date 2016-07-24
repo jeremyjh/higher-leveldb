@@ -77,6 +77,8 @@ import qualified Control.Monad.Except              as Except
 import qualified Control.Monad.Trans.Error as Error
 #endif
 
+import Control.Monad.Catch (MonadThrow (..), MonadCatch (..), MonadMask (..))
+
 import qualified Control.Monad.Trans.Cont          as Cont
 import qualified Control.Monad.Trans.Identity      as Identity
 import qualified Control.Monad.Trans.List          as List
@@ -150,6 +152,23 @@ instance MonadTrans LevelDBT where
 
 instance (MonadResourceBase m) => MonadResource (LevelDBT m) where
     liftResourceT = LevelDBT . liftResourceT
+
+instance MonadCatch m => MonadCatch (LevelDBT m) where
+  catch (LevelDBT m) c =
+    LevelDBT . ReaderT $ \r -> (runReaderT m) r `catch` \e -> runReaderT (unLevelDBT (c e)) r
+
+instance MonadMask m => MonadMask (LevelDBT m) where
+  mask a = LevelDBT . ReaderT $ \e -> mask $ \u -> runReaderT (unLevelDBT (a $ q u)) e
+    where
+      q ::  (ResourceT m a -> ResourceT m a) -> LevelDBT m a -> LevelDBT m a
+      q u (LevelDBT (ReaderT b)) =
+        LevelDBT $ ReaderT (u . b)
+  uninterruptibleMask a =
+    LevelDBT . ReaderT $ \e -> uninterruptibleMask $ \u -> runReaderT (unLevelDBT (a $ q u)) e
+    where
+      q ::  (ResourceT m a -> ResourceT m a) -> LevelDBT m a -> LevelDBT m a
+      q u (LevelDBT (ReaderT b)) =
+        LevelDBT $ ReaderT (u . b)
 
 #if MIN_VERSION_monad_control(1,0,0)
 instance MonadTransControl LevelDBT where

@@ -26,16 +26,17 @@ library
   -- other-modules:       
   hs-source-dirs:      src
   build-depends:       base == 4.*
-                       , cereal  >= 0.4 && < 0.6
-                       , lifted-base >= 0.2.1.1 && < 0.3
-                       , leveldb-haskell >= 0.2 && <= 0.7
-                       , bytestring >= 0.10 && < 0.11
-                       , resourcet       >=  1.1.0 && <= 1.2
-                       , transformers-base >= 0.4.1 && < 0.5
-                       , mtl >= 2.0 && < 2.3
-                       , monad-control >= 0.3 && < 1.1
-                       , data-default >= 0.5.1 && < 0.8
-                       , transformers >= 0.3 && < 0.6
+                     , bytestring >= 0.10 && < 0.11
+                     , cereal  >= 0.4 && < 0.6
+                     , data-default >= 0.5.1 && < 0.8
+                     , exceptions >= 0.6.0
+                     , leveldb-haskell >= 0.2 && <= 0.7
+                     , lifted-base >= 0.2.1.1 && < 0.3
+                     , monad-control >= 0.3 && < 1.1
+                     , mtl >= 2.0 && < 2.3
+                     , resourcet       >=  1.1.0 && <= 1.2
+                     , transformers >= 0.3 && < 0.6
+                     , transformers-base >= 0.4.1 && < 0.5
 
 
 test-suite spec
