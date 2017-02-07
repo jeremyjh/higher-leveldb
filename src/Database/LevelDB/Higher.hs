@@ -104,7 +104,7 @@ import qualified Control.Monad.Trans.Writer.Strict as Strict
 -- >     put "key:1" "this is a value"
 -- >     get "key:1"
 -- >
--- >Just "this is a value"
+-- > Just "this is a value"
 --
 
 type Key = ByteString
@@ -422,10 +422,10 @@ scan k ScanQuery{..} = do
 -- | Structure containing functions used within the 'scan' function. You may want to start
 -- with one of the builder/helper funcions such as 'queryItems', which is defined as:
 --
--- >queryItems = queryBegins { scanInit = []
--- >                         , scanMap = id
--- >                         , scanFold = (:)
--- >                         }
+-- > queryItems = queryBegins { scanInit = []
+-- >                          , scanMap = id
+-- >                          , scanFold = (:)
+-- >                          }
 data ScanQuery a b = ScanQuery {
                          -- | starting value for fold/reduce
                          scanInit :: b
