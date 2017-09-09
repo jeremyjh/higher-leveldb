@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                higher-leveldb
-version:             0.4.0.0
+version:             0.4.0.1
 synopsis:            A rich monadic API for working with leveldb databases.
 description:         A rich monadic API for working with leveldb databases.
 homepage:            https://github.com/jeremyjh/higher-leveldb
@@ -40,7 +40,7 @@ library
 
 
 test-suite spec
-  ghc-options:       -optl-Wl,-rpath,/usr/local/lib,-enable-new-dtags
+  ghc-options:       -optl-Wl,-rpath,/usr/local/lib
   other-modules:     Database.LevelDB.HigherSpec
   type:              exitcode-stdio-1.0
   hs-source-dirs:    test
