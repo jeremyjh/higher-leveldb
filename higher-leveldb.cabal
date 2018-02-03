@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                higher-leveldb
-version:             0.4.0.1
+version:             0.5.0.0
 synopsis:            A rich monadic API for working with leveldb databases.
 description:         A rich monadic API for working with leveldb databases.
 homepage:            https://github.com/jeremyjh/higher-leveldb
@@ -31,12 +31,11 @@ library
                      , data-default >= 0.5.1 && < 0.8
                      , exceptions >= 0.6.0
                      , leveldb-haskell >= 0.2 && <= 0.7
-                     , lifted-base >= 0.2.1.1 && < 0.3
-                     , monad-control >= 0.3 && < 1.1
                      , mtl >= 2.0 && < 2.3
-                     , resourcet       >=  1.1.0 && <= 1.2
+                     , resourcet       >=  1.2.0 && <= 1.3
                      , transformers >= 0.3 && < 0.6
                      , transformers-base >= 0.4.1 && < 0.5
+                     , unliftio-core >= 0.1 && < 0.2
 
 
 test-suite spec
@@ -53,8 +52,6 @@ test-suite spec
                    , leveldb-haskell
                    , bytestring
                    , process
-                   , monad-control
                    , transformers-base
                    , mtl
                    , transformers
-                   , lifted-base

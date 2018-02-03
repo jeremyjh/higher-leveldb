@@ -43,7 +43,7 @@ module Database.LevelDB.Higher
     , runResourceT
     , Options(..), ReadOptions(..), WriteOptions(..), RWOptions
     , WriteBatch, def
-    , MonadThrow, MonadResourceBase
+    , MonadThrow, MonadUnliftIO
     ) where
 
 
@@ -56,8 +56,11 @@ import           Control.Applicative               (Applicative)
 #endif
 import           Control.Monad.Base                (MonadBase(..))
 
-import           Control.Concurrent.MVar.Lifted
 import           Control.Concurrent                (ThreadId)
+import           Control.Concurrent.MVar           (MVar
+                                                   , newMVar
+                                                   , takeMVar
+                                                   , putMVar)
 
 import qualified Data.ByteString                   as BS
 import           Data.ByteString                   (ByteString)
@@ -68,17 +71,14 @@ import qualified Database.LevelDB                  as LDB
 import           Database.LevelDB
     hiding (put, get, delete, write, withSnapshot)
 import           Control.Monad.Trans.Resource
-import           Control.Monad.Trans.Control
 import           Control.Monad.Catch               (MonadCatch (..)
                                                    , MonadMask (..))
-
 
 #if MIN_VERSION_mtl(2,2,1)
 import qualified Control.Monad.Except              as Except
 #else
 import qualified Control.Monad.Trans.Error as Error
 #endif
-
 
 import qualified Control.Monad.Trans.Cont          as Cont
 import qualified Control.Monad.Trans.Identity      as Identity
@@ -151,7 +151,7 @@ instance (MonadBase b m) => MonadBase b (LevelDBT m) where
 instance MonadTrans LevelDBT where
     lift = LevelDBT . lift . lift
 
-instance (MonadResourceBase m) => MonadResource (LevelDBT m) where
+instance (MonadUnliftIO m) => MonadResource (LevelDBT m) where
     liftResourceT = LevelDBT . liftResourceT
 
 instance MonadCatch m => MonadCatch (LevelDBT m) where
@@ -171,42 +171,12 @@ instance MonadMask m => MonadMask (LevelDBT m) where
         q u (LevelDBT (ReaderT b)) =
           LevelDBT $ ReaderT (u . b)
 
-#if MIN_VERSION_monad_control(1,0,0)
-instance MonadTransControl LevelDBT where
-    type StT LevelDBT a = StT ResourceT (StT (ReaderT DBContext) a)
-    liftWith f =
-            LevelDBT $ liftWith $ \run ->
-                       liftWith $ \run' ->
-                       f $ run' . run . unLevelDBT
-    restoreT = LevelDBT . restoreT . restoreT
-
-instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
-    type StM (LevelDBT m) a =  ComposeSt LevelDBT m a
-    liftBaseWith = defaultLiftBaseWith
-    restoreM     = defaultRestoreM
-#else
-instance MonadTransControl LevelDBT where
-    newtype StT LevelDBT a = StLevelDBT
-            {unStLevelDBT :: StT ResourceT (StT (ReaderT DBContext) a) }
-    liftWith f =
-            LevelDBT $ liftWith $ \run ->
-                       liftWith $ \run' ->
-                       f $ liftM StLevelDBT . run' . run . unLevelDBT
-    restoreT = LevelDBT . restoreT . restoreT . liftM unStLevelDBT
-
-instance (MonadBaseControl b m) => MonadBaseControl b (LevelDBT m) where
-    newtype StM (LevelDBT m) a =  StMT {unStMT :: ComposeSt LevelDBT m a}
-    liftBaseWith = defaultLiftBaseWith StMT
-    restoreM     = defaultRestoreM unStMT
-#endif
-
 -- | MonadLevelDB class used by all the public functions in this module.
 class ( Monad m
       , MonadThrow m
       , MonadIO m
       , Applicative m
-      , MonadResource m
-      , MonadBase IO m )
+      , MonadResource m )
       => MonadLevelDB m where
     -- | Override context for an action - only usable internally for functions
     -- like 'withKeySpace' and 'withOptions'.
@@ -214,7 +184,7 @@ class ( Monad m
     -- | Lift a LevelDBT IO action into the current monad.
     liftLevelDB :: LevelDBT IO a -> m a
 
-instance (MonadResourceBase m) => MonadLevelDB (LevelDBT m) where
+instance (MonadThrow m, MonadUnliftIO m) => MonadLevelDB (LevelDBT m) where
     liftLevelDB = mapLevelDBT liftIO
     withDBContext = localLDB
 
@@ -252,7 +222,7 @@ type LevelDB a = LevelDBT IO a
 -- tip: you can use the Data.Default (def) method to specify default options e.g.
 --
 -- > runLevelDB "/tmp/mydb" def (def, def{sync = true}) "My Keyspace" $ do
-runLevelDB :: (MonadResourceBase m)
+runLevelDB :: (MonadThrow m, MonadUnliftIO m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
            -> RWOptions -- ^ default read/write ops; use 'withOptions' to override
@@ -263,7 +233,7 @@ runLevelDB path dbopt rwopt ks ma = runResourceT $ runLevelDB' path dbopt rwopt 
 
 -- |Same as 'runLevelDB' but doesn't call 'runResourceT'. This gives you the option
 -- to manage that yourself
-runLevelDB' :: (MonadResourceBase m)
+runLevelDB' :: (MonadThrow m, MonadUnliftIO m)
            => FilePath -- ^ path to DB to open/create
            -> Options -- ^ database options to use
            -> RWOptions -- ^ default read/write ops; use 'withOptions' to override
@@ -272,7 +242,7 @@ runLevelDB' :: (MonadResourceBase m)
            -> ResourceT m a
 runLevelDB' path dbopt rwopt ks ma = do
     db <- openDB
-    mv <- newMVar 0
+    mv <- liftIO $ newMVar 0
     ksId <- withSystemContext db mv $ getKeySpaceId ks
     runReaderT (unLevelDBT ma) (DBC db ksId mv rwopt)
   where
@@ -281,7 +251,7 @@ runLevelDB' path dbopt rwopt ks ma = do
         runReaderT (unLevelDBT sctx) $ DBC db systemKeySpaceId mv rwopt
 
 -- | A helper for runLevelDB using default 'Options' except createIfMissing=True
-runCreateLevelDB :: (MonadResourceBase m)
+runCreateLevelDB :: (MonadThrow m, MonadUnliftIO m)
            => FilePath -- ^ path to DB to open/create
            -> KeySpace -- ^ "Bucket" in which Keys will be unique
            -> LevelDBT m a -- ^ The actions to execute
@@ -496,10 +466,10 @@ getDB = liftLevelDB $ asksLDB (\dbc ->
 
 -- | This little dance with asksLDB & localLDB let's us get away from
 -- exposing MonadReader DBContext in LevelDBT.
-asksLDB :: (MonadResourceBase m) => (DBContext -> a) -> LevelDBT m a
+asksLDB :: (MonadUnliftIO m) => (DBContext -> a) -> LevelDBT m a
 asksLDB = LevelDBT . asks
 
-localLDB :: (MonadResourceBase m)
+localLDB :: (MonadUnliftIO m)
          => (DBContext -> DBContext)
          -> LevelDBT m a -> LevelDBT m a
 localLDB f ma = LevelDBT $ local f (unLevelDBT ma)
@@ -541,8 +511,8 @@ getKeySpaceId ks
         case findMaxId of
             (Just found) -> putMVarDBC $ decodeKsId found
             Nothing      -> putMVarDBC 2 -- first user keyspace
-    putMVarDBC v = asksLDB dbcSyncMV >>= flip putMVar v
-    takeMVarDBC = asksLDB dbcSyncMV >>= takeMVar
+    putMVarDBC v = asksLDB dbcSyncMV >>= liftIO . flip putMVar v
+    takeMVarDBC = asksLDB dbcSyncMV >>= liftIO . takeMVar
     decodeKsId bs =
         case decode bs of
             Left e -> error $

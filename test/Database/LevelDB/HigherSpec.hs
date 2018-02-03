@@ -9,12 +9,12 @@ import           Data.Monoid
 import           Test.Hspec
 import           System.Process(system)
 import           Database.LevelDB.Higher
+import           Control.Concurrent                (ThreadId, threadDelay)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Reader
 import           Control.Monad.Writer
 import           Control.Applicative              (Applicative)
 import           Control.Monad.Base               (MonadBase(..))
-import           Control.Concurrent.Lifted
 
 --debug
 import           Debug.Trace
@@ -128,9 +128,9 @@ spec = do
                     put "onetwo" "three"
                     forkTestAppR $ do
                         rv <- ask
-                        threadDelay 1
+                        liftIO $ threadDelay 1
                         put "three" rv
-                    threadDelay 100
+                    liftIO $ threadDelay 100
                     get "three"
                 `shouldReturn` Just "a string value to read"
             it "scans with a keyspace" $ do
