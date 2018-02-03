@@ -9,7 +9,8 @@ import           Data.Monoid
 import           Test.Hspec
 import           System.Process(system)
 import           Database.LevelDB.Higher
-import           Control.Concurrent                (ThreadId, threadDelay)
+import           UnliftIO.Concurrent                (ThreadId, threadDelay)
+import           UnliftIO.MVar
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Reader
 import           Control.Monad.Writer
@@ -128,9 +129,9 @@ spec = do
                     put "onetwo" "three"
                     forkTestAppR $ do
                         rv <- ask
-                        liftIO $ threadDelay 1
+                        threadDelay 1
                         put "three" rv
-                    liftIO $ threadDelay 100
+                    threadDelay 100
                     get "three"
                 `shouldReturn` Just "a string value to read"
             it "scans with a keyspace" $ do
@@ -140,7 +141,17 @@ spec = do
                     xs <- scan "" queryItems
                     return $ length xs
                 `shouldReturn` 10
-
+        describe "exports a working MonadUnliftIO instance" $ do
+          it "can modifyMVar in a working LevelDBT context" $ do
+            withDBT $ do
+                mv <- newMVar 0
+                modifyMVar_ mv $ \v -> do
+                    put "somekey" "somedata"
+                    return (v + 1)
+                mvalue <- readMVar mv
+                Just ldbvalue <- get "somekey"
+                return (mvalue, ldbvalue)
+            `shouldReturn` (1, "somedata")
 
 testDB = "/tmp/leveltest"
 dbOpts = def {createIfMissing = True, cacheSize= 2048}

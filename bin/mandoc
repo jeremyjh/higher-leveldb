@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -e
 #manually upload docs to hackage
 #required because hackage build server doesnt have leveldb.so
 

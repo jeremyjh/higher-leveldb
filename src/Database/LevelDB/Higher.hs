@@ -73,6 +73,7 @@ import           Database.LevelDB
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Catch               (MonadCatch (..)
                                                    , MonadMask (..))
+import           Control.Monad.IO.Unlift
 
 #if MIN_VERSION_mtl(2,2,1)
 import qualified Control.Monad.Except              as Except
@@ -170,6 +171,11 @@ instance MonadMask m => MonadMask (LevelDBT m) where
         q ::  (ResourceT m a -> ResourceT m a) -> LevelDBT m a -> LevelDBT m a
         q u (LevelDBT (ReaderT b)) =
           LevelDBT $ ReaderT (u . b)
+
+instance MonadUnliftIO m => MonadUnliftIO (LevelDBT m) where
+  askUnliftIO = LevelDBT $
+                withUnliftIO $ \u ->
+                return (UnliftIO (unliftIO u . unLevelDBT))
 
 -- | MonadLevelDB class used by all the public functions in this module.
 class ( Monad m
