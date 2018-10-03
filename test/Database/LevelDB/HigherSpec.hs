@@ -1,21 +1,22 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 module Database.LevelDB.HigherSpec (main, spec) where
 
-import qualified Data.ByteString                  as BS
-import           Data.Serialize                   (encode)
-import           Data.Monoid
-import           Test.Hspec
-import           System.Process(system)
-import           Database.LevelDB.Higher
-import           UnliftIO.Concurrent                (ThreadId, threadDelay)
-import           UnliftIO.MVar
-import           Control.Monad.Trans.Resource
+import           Control.Applicative          (Applicative)
+import           Control.Monad.Base           (MonadBase (..))
 import           Control.Monad.Reader
+import           Control.Monad.Trans.Resource
 import           Control.Monad.Writer
-import           Control.Applicative              (Applicative)
-import           Control.Monad.Base               (MonadBase(..))
+import qualified Data.ByteString              as BS
+import           Data.Maybe                   (fromJust)
+import           Data.Monoid
+import           Data.Serialize               (encode)
+import           Database.LevelDB.Higher
+import           System.Process               (system)
+import           Test.Hspec
+import           UnliftIO.Concurrent          (ThreadId, threadDelay)
+import           UnliftIO.MVar
 
 --debug
 import           Debug.Trace
@@ -149,7 +150,7 @@ spec = do
                     put "somekey" "somedata"
                     return (v + 1)
                 mvalue <- readMVar mv
-                Just ldbvalue <- get "somekey"
+                ldbvalue <- fromJust <$> get "somekey"
                 return (mvalue, ldbvalue)
             `shouldReturn` (1, "somedata")
 
