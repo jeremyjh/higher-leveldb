@@ -2,10 +2,10 @@
 # For more information, see: http://docs.haskellstack.org/en/stable/yaml_configuration/
 
 # Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)
-resolver: nightly-2018-09-29
+resolver: lts-14.27
 
 # Local packages, usually specified by relative directory name
 packages:
 - '.'
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
-extra-deps: [ resourcet-1.2.0 ]
+extra-deps: [ unliftio-core-0.2.0.0, resourcet-1.2.3 ]

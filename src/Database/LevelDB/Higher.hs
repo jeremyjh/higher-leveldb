@@ -69,12 +69,10 @@ import           Data.Serialize                    (encode, decode)
 import           Data.Default                      (def)
 import qualified Database.LevelDB                  as LDB
 import           Database.LevelDB
-    hiding (put, get, delete, write, withSnapshot)
+    hiding (put, get, delete, withSnapshot)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.Catch               (MonadCatch (..)
                                                    , MonadMask (..))
-import           Control.Monad.IO.Unlift
-
 #if MIN_VERSION_mtl(2,2,1)
 import qualified Control.Monad.Except              as Except
 #else
@@ -83,7 +81,6 @@ import qualified Control.Monad.Trans.Error as Error
 
 import qualified Control.Monad.Trans.Cont          as Cont
 import qualified Control.Monad.Trans.Identity      as Identity
-import qualified Control.Monad.Trans.List          as List
 import qualified Control.Monad.Trans.Maybe         as Maybe
 import qualified Control.Monad.Trans.State         as State
 import qualified Control.Monad.Trans.Writer        as Writer
@@ -144,7 +141,7 @@ instance Show DBContext where
 -- If you aren't building a custom monad stack you can just use the 'LevelDB' alias.
 newtype LevelDBT m a
         =  LevelDBT { unLevelDBT :: ReaderT DBContext (ResourceT m) a }
-            deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow)
+            deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow, MonadUnliftIO, MonadMask)
 
 instance (MonadBase b m) => MonadBase b (LevelDBT m) where
     liftBase = lift . liftBase
@@ -158,24 +155,6 @@ instance (MonadUnliftIO m) => MonadResource (LevelDBT m) where
 instance MonadCatch m => MonadCatch (LevelDBT m) where
     catch (LevelDBT m) c =
       LevelDBT . ReaderT $ \r -> runReaderT m r `catch` \e -> runReaderT (unLevelDBT (c e)) r
-
-instance MonadMask m => MonadMask (LevelDBT m) where
-    mask a = LevelDBT . ReaderT $ \e -> mask $ \u -> runReaderT (unLevelDBT (a $ q u)) e
-      where
-        q ::  (ResourceT m a -> ResourceT m a) -> LevelDBT m a -> LevelDBT m a
-        q u (LevelDBT (ReaderT b)) =
-          LevelDBT $ ReaderT (u . b)
-    uninterruptibleMask a =
-      LevelDBT . ReaderT $ \e -> uninterruptibleMask $ \u -> runReaderT (unLevelDBT (a $ q u)) e
-      where
-        q ::  (ResourceT m a -> ResourceT m a) -> LevelDBT m a -> LevelDBT m a
-        q u (LevelDBT (ReaderT b)) =
-          LevelDBT $ ReaderT (u . b)
-
-instance MonadUnliftIO m => MonadUnliftIO (LevelDBT m) where
-  askUnliftIO = LevelDBT $
-                withUnliftIO $ \u ->
-                return (UnliftIO (unliftIO u . unLevelDBT))
 
 -- | MonadLevelDB class used by all the public functions in this module.
 class ( Monad m
@@ -204,7 +183,6 @@ instance (M, MonadLevelDB m) => MonadLevelDB (T m)                \
 INST(Monad m,ReaderT r, mapReaderT) --Monad m is a no-op to save another define
 INST(Monad m,Maybe.MaybeT, Maybe.mapMaybeT)
 INST(Monad m,Identity.IdentityT, Identity.mapIdentityT)
-INST(Monad m,List.ListT, List.mapListT)
 INST(Monad m,Cont.ContT r, Cont.mapContT)
 INST(Monad m,State.StateT s, State.mapStateT )
 INST(Monad m,Strict.StateT s, Strict.mapStateT )
